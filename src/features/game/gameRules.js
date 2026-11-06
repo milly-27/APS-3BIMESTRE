@@ -7,6 +7,13 @@ export const DIFFICULTY_RANGES = Object.freeze({
   expert: Object.freeze({ min: 14, max: Infinity }),
 })
 
+export const DIFFICULTY_LABELS = Object.freeze({
+  easy: 'Fácil',
+  medium: 'Médio',
+  hard: 'Difícil',
+  expert: 'Muito Difícil',
+})
+
 export function normalizeWord(word) {
   if (typeof word !== 'string' || word.trim().length === 0) {
     throw new TypeError('A palavra precisa ser um texto não vazio.')
@@ -89,6 +96,36 @@ export function guessLetter(round, input) {
     incorrectGuesses,
     status: incorrectGuesses.length >= round.maxErrors ? 'lost' : 'in_progress',
   }
+}
+
+export function calculateScore({ difficulty, elapsedSeconds, errors, won }) {
+  if (!Object.hasOwn(DIFFICULTY_RANGES, difficulty)) {
+    throw new TypeError('Selecione um nível de dificuldade válido.')
+  }
+
+  if (
+    !Number.isFinite(elapsedSeconds)
+    || elapsedSeconds < 0
+    || !Number.isInteger(errors)
+    || errors < 0
+    || errors > MAX_ERRORS
+    || typeof won !== 'boolean'
+  ) {
+    throw new TypeError('O resultado da rodada precisa ter tempo, erros e vitória válidos.')
+  }
+
+  const difficultyBase = {
+    easy: 120,
+    medium: 155,
+    hard: 200,
+    expert: 245,
+  }
+
+  const timeBonus = Math.max(0, 120 - elapsedSeconds)
+  const resultBonus = won ? 150 : 0
+  const errorPenalty = errors * 15
+
+  return Math.max(0, difficultyBase[difficulty] + timeBonus + resultBonus - errorPenalty)
 }
 
 export function compareResults(first, second) {

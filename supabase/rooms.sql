@@ -24,8 +24,10 @@ create table if not exists public.room_word_bank (
 );
 
 create table if not exists public.room_secrets (
-  room_id uuid primary key references public.rooms (id) on delete cascade,
-  word text not null
+  room_id uuid not null references public.rooms (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  word text not null,
+  primary key (room_id, user_id)
 );
 
 create table if not exists public.room_round_players (
@@ -302,19 +304,30 @@ begin
     raise exception using errcode = '55000', message = 'Aguarde pelo menos mais um jogador antes de iniciar.';
   end if;
 
-  select wb.word
-    into v_word
-    from public.room_word_bank as wb
-    where wb.difficulty = v_room.difficulty
-    order by random()
-    limit 1;
-
-  if v_word is null then
+  if not exists (
+    select 1 from public.room_word_bank as wb where wb.difficulty = v_room.difficulty
+  ) then
     raise exception using errcode = '55000', message = 'Não há palavras cadastradas para esta dificuldade.';
   end if;
 
-  insert into public.room_secrets (room_id, word)
-    values (p_room_id, v_word);
+  with ranked_words as (
+    select word, row_number() over (order by random()) as word_position
+    from public.room_word_bank
+    where difficulty = v_room.difficulty
+  ),
+  player_order as (
+    select rp.user_id,
+           row_number() over (order by rp.joined_at, rp.user_id) as player_position
+    from public.room_players as rp
+    where rp.room_id = p_room_id
+  )
+  insert into public.room_secrets (room_id, user_id, word)
+  select p_room_id,
+         po.user_id,
+         rw.word
+  from player_order as po
+  join ranked_words as rw
+    on rw.word_position = ((po.player_position - 1) % (select count(*) from ranked_words)) + 1;
 
   insert into public.room_round_players (room_id, user_id)
     select p_room_id, rp.user_id
@@ -369,7 +382,8 @@ begin
     into v_word, v_room_status, v_difficulty
     from public.room_secrets as rs
     join public.rooms as r on r.id = rs.room_id
-    where rs.room_id = p_room_id;
+    where rs.room_id = p_room_id
+      and rs.user_id = auth.uid();
 
   if not found then
     raise exception using errcode = 'P0002', message = 'A rodada desta sala ainda não foi iniciada.';
@@ -464,7 +478,8 @@ begin
     into v_word, v_room_status, v_difficulty
     from public.room_secrets as rs
     join public.rooms as r on r.id = rs.room_id
-    where rs.room_id = p_room_id;
+    where rs.room_id = p_room_id
+      and rs.user_id = auth.uid();
 
   if not found then
     raise exception using errcode = '42501', message = 'Você não participa de uma rodada ativa desta sala.';

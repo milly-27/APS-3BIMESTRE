@@ -1,6 +1,10 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { z } from 'zod'
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase.js'
+import {
+  getAuthRedirectUrl,
+  getSupabaseClient,
+  isSupabaseConfigured,
+} from '../lib/supabase.js'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const loginSchema = z.object({
@@ -99,6 +103,7 @@ export function AuthProvider({ children }) {
       password,
       options: {
         data: { display_name: displayName.trim() },
+        emailRedirectTo: getAuthRedirectUrl('/login'),
       },
     })
 
@@ -108,9 +113,58 @@ export function AuthProvider({ children }) {
 
     if (data.session) {
       setSession(data.session)
+      return { ...data, requiresEmailVerification: false }
+    }
+
+    const { error: otpError } = await getSupabaseClient().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: false,
+      },
+    })
+
+    if (otpError) {
+      throw new Error(`Não foi possível enviar o código de confirmação: ${otpError.message}`, {
+        cause: otpError,
+      })
+    }
+
+    return { ...data, requiresEmailVerification: true }
+  }
+
+  async function verifyEmailCode({ email, token }) {
+    setAuthError('')
+    const { data, error } = await getSupabaseClient().auth.verifyOtp({
+      email,
+      token,
+      type: 'email',
+    })
+
+    if (error) {
+      throw new Error(`Não foi possível validar o código: ${error.message}`, { cause: error })
+    }
+
+    if (data.session) {
+      setSession(data.session)
     }
 
     return data
+  }
+
+  async function resendVerificationCode({ email }) {
+    setAuthError('')
+    const { error } = await getSupabaseClient().auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: false,
+      },
+    })
+
+    if (error) {
+      throw new Error(`Não foi possível reenviar o código: ${error.message}`, { cause: error })
+    }
+
+    return true
   }
 
   async function signOut() {
@@ -130,9 +184,11 @@ export function AuthProvider({ children }) {
     pendingScore,
     session,
     setPendingScore,
+    resendVerificationCode,
     signIn,
     signOut,
     signUp,
+    verifyEmailCode,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

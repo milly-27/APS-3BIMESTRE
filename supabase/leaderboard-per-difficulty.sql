@@ -1,8 +1,29 @@
 begin;
 
+create table if not exists public.leaderboard (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  display_name text not null check (char_length(display_name) between 1 and 32),
+  difficulty text not null check (difficulty in ('easy', 'medium', 'hard', 'expert')),
+  elapsed_seconds integer not null check (elapsed_seconds >= 0),
+  errors integer not null check (errors between 0 and 9),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, difficulty)
+);
+
 alter table public.leaderboard drop constraint if exists leaderboard_pkey;
 alter table public.leaderboard
   add constraint leaderboard_pkey primary key (user_id, difficulty);
+
+alter table public.leaderboard enable row level security;
+
+drop policy if exists "Anyone can read the leaderboard" on public.leaderboard;
+create policy "Anyone can read the leaderboard"
+  on public.leaderboard for select
+  to anon, authenticated
+  using (true);
+
+revoke all on public.leaderboard from anon, authenticated;
+grant select on public.leaderboard to anon, authenticated;
 
 create or replace function public.save_ranking_result(
   p_display_name text,

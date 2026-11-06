@@ -17,6 +17,16 @@
   --font-mono: ui-monospace, Consolas, monospace;
 }
 
+:root[data-theme='light'] {
+  color-scheme: light;
+  --color-background: #f4f2ff;
+  --color-surface: #ffffff;
+  --color-text: #1a1630;
+  --color-muted: #5c5974;
+  --color-accent: #6548ef;
+  --color-border: rgba(73, 60, 127, 0.14);
+}
+
 * {
   box-sizing: border-box;
 }

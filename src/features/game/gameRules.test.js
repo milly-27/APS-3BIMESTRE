@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  calculateScore,
   compareResults,
   createRound,
   getDifficultyForWord,
@@ -117,4 +118,15 @@ test('compares results by time first and errors only as a tiebreaker', () => {
     { elapsedSeconds: -1, errors: 0 },
     { elapsedSeconds: 10, errors: 0 },
   ), TypeError)
+})
+
+test('calculates scores from the round result, rewarding wins and penalizing mistakes', () => {
+  const winScore = calculateScore({ difficulty: 'easy', elapsedSeconds: 30, errors: 1, won: true })
+  const worseWinScore = calculateScore({ difficulty: 'easy', elapsedSeconds: 30, errors: 3, won: true })
+  const lossScore = calculateScore({ difficulty: 'hard', elapsedSeconds: 60, errors: 4, won: false })
+
+  assert.ok(winScore > worseWinScore)
+  assert.ok(lossScore >= 0)
+  assert.ok(winScore > lossScore)
+  assert.throws(() => calculateScore({ difficulty: 'easy', elapsedSeconds: -1, errors: 0, won: true }), TypeError)
 })

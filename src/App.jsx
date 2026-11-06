@@ -31,15 +31,137 @@ const difficulties = [
   { value: 'easy', label: 'Fácil', detail: '3 a 5 letras' },
   { value: 'medium', label: 'Médio', detail: '6 a 8 letras' },
   { value: 'hard', label: 'Difícil', detail: '9 a 12 letras' },
-  { value: 'expert', label: 'Expert', detail: '14 letras ou mais' },
+  { value: 'expert', label: 'Muito Difícil', detail: '14 letras ou mais' },
 ]
 
-const pages = [
-  { path: '/configuracoes', label: 'Configurações', title: 'Configurações', description: 'As preferências da partida serão implementadas junto às telas do jogo.' },
-]
+const ROUND_TIME_LIMIT_SECONDS = 90
 
 function formatElapsedTime(seconds) {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function readStoredValue(key, fallback) {
+  if (typeof window === 'undefined') {
+    return fallback
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(key)
+    return rawValue === null ? fallback : JSON.parse(rawValue)
+  } catch {
+    return fallback
+  }
+}
+
+function writeStoredValue(key, value) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    // Ignora falhas por limitação de armazenamento do navegador.
+  }
+}
+
+function playTone({ enabled, frequency, duration = 0.12, type = 'sine' }) {
+  if (!enabled || typeof window === 'undefined') {
+    return
+  }
+
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext
+  if (!AudioContextCtor) {
+    return
+  }
+
+  const audioContext = new AudioContextCtor()
+  const oscillator = audioContext.createOscillator()
+  const gainNode = audioContext.createGain()
+
+  oscillator.type = type
+  oscillator.frequency.value = frequency
+  gainNode.gain.value = 0.08
+
+  oscillator.connect(gainNode)
+  gainNode.connect(audioContext.destination)
+
+  oscillator.start()
+
+  window.setTimeout(() => {
+    oscillator.stop()
+    void audioContext.close()
+  }, duration * 1000)
+}
+
+function getAchievementList(result) {
+  if (!result) {
+    return []
+  }
+
+  const achievements = []
+
+  if (result.status === 'won') {
+    achievements.push({ id: 'victory', title: 'Vitória', description: 'Conquistou uma rodada.' })
+  }
+
+  if (result.errors === 0 && result.status === 'won') {
+    achievements.push({ id: 'perfect', title: 'Sem erros', description: 'Venceu sem errar nenhuma letra.' })
+  }
+
+  if (result.elapsedSeconds <= 30 && result.status === 'won') {
+    achievements.push({ id: 'speed', title: 'Resposta rápida', description: 'Terminou a rodada em 30 segundos ou menos.' })
+  }
+
+  if (result.status === 'lost') {
+    achievements.push({ id: 'survivor', title: 'Persistência', description: 'Ainda tentou até o fim da rodada.' })
+  }
+
+  return achievements
+}
+
+function SettingsPage({ theme, setTheme, soundEnabled, setSoundEnabled }) {
+  return (
+    <section className="page-card" aria-labelledby="settings-title">
+      <p className="eyebrow">Configurações</p>
+      <h1 id="settings-title">Preferências do jogo</h1>
+      <p className="page-description">
+        Ajuste o tema visual e os efeitos sonoros do jogo para a sua experiência.
+      </p>
+
+      <div className="settings-list">
+        <div className="settings-item">
+          <div>
+            <strong>Tema visual</strong>
+            <span>{theme === 'dark' ? 'Escuro' : 'Claro'}</span>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+            type="button"
+          >
+            {theme === 'dark' ? 'Modo claro' : 'Modo escuro'}
+          </button>
+        </div>
+
+        <div className="settings-item">
+          <div>
+            <strong>Efeitos sonoros</strong>
+            <span>{soundEnabled ? 'Ativados' : 'Desativados'}</span>
+          </div>
+          <button
+            className="button button-secondary"
+            onClick={() => setSoundEnabled((current) => !current)}
+            type="button"
+          >
+            {soundEnabled ? 'Desativar som' : 'Ativar som'}
+          </button>
+        </div>
+      </div>
+
+      <Link className="text-link" to="/">Voltar ao início</Link>
+    </section>
+  )
 }
 
 function RankingPage() {
@@ -122,6 +244,7 @@ function ResultPage() {
   const [error, setError] = useState('')
   const isRegisteredUser = Boolean(session?.user && !session.user.is_anonymous)
   const displayName = session?.user?.user_metadata?.display_name || 'Jogador'
+  const achievements = getAchievementList(pendingScore)
 
   useEffect(() => {
     if (!pendingScore || pendingScore.status !== 'won' || !isRegisteredUser || !displayName) {
@@ -199,22 +322,42 @@ function ResultPage() {
       {isSaving && <p className="page-description" aria-live="polite">Registrando resultado...</p>}
       {notice && <p className="feature-notice" role="status">{notice}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      <Link className="button button-secondary" to="/ranking">Ver ranking</Link>
+      {achievements.length > 0 && (
+        <div className="achievement-box" aria-label="Conquistas obtidas">
+          <h2>Conquistas</h2>
+          <ul>
+            {achievements.map((achievement) => (
+              <li key={achievement.id}>
+                <strong>{achievement.title}</strong>
+                <span>{achievement.description}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="action-row">
+        <Link className="button button-primary" to="/salas">Jogar novamente</Link>
+        <Link className="button button-secondary" to="/ranking">Ver ranking</Link>
+        <Link className="button button-secondary" to="/">Voltar ao menu</Link>
+      </div>
     </section>
   )
 }
 
-function PagePlaceholder({ title, description }) {
-  return (
-    <section className="page-card" aria-labelledby="page-title">
-      <p className="eyebrow">Jogo da Forca</p>
-      <h1 id="page-title">{title}</h1>
-      <p className="page-description">{description}</p>
-    </section>
-  )
-}
-
-function AuthField({ id, name, label, type, value, onChange, error, autoComplete }) {
+function AuthField({
+  id,
+  name,
+  label,
+  type,
+  value,
+  onChange,
+  error,
+  autoComplete,
+  inputMode,
+  maxLength,
+  pattern,
+  placeholder,
+}) {
   return (
     <label className="form-field" htmlFor={id}>
       <span>{label}</span>
@@ -223,8 +366,12 @@ function AuthField({ id, name, label, type, value, onChange, error, autoComplete
         aria-describedby={error ? `${id}-error` : undefined}
         autoComplete={autoComplete}
         id={id}
+        inputMode={inputMode}
+        maxLength={maxLength}
         name={name}
         onChange={onChange}
+        pattern={pattern}
+        placeholder={placeholder}
         required
         type={type}
         value={value}
@@ -320,18 +467,33 @@ function LoginPage() {
 }
 
 function SignUpPage() {
-  const { signUp, pendingScore } = useAuth()
+  const { resendVerificationCode, signIn, signUp, verifyEmailCode, pendingScore } = useAuth()
   const navigate = useNavigate()
   const [values, setValues] = useState({
     displayName: '',
     email: '',
     password: '',
     confirmPassword: '',
+    otpCode: '',
   })
   const [fieldErrors, setFieldErrors] = useState({})
   const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
+  const [pendingOtp, setPendingOtp] = useState(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [resendCooldown, setResendCooldown] = useState(0)
+
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return undefined
+    }
+
+    const timer = window.setTimeout(() => {
+      setResendCooldown((current) => Math.max(0, current - 1))
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [resendCooldown])
 
   function updateField(event) {
     const { name, value } = event.target
@@ -345,6 +507,32 @@ function SignUpPage() {
     event.preventDefault()
     setFormError('')
     setNotice('')
+
+    if (pendingOtp) {
+      const token = values.otpCode.trim()
+
+      if (!token) {
+        setFieldErrors((current) => ({ ...current, otpCode: 'Informe o código recebido por e-mail.' }))
+        return
+      }
+
+      setFieldErrors({})
+      setIsSubmitting(true)
+      try {
+        await verifyEmailCode({ email: pendingOtp.email, token })
+        const result = await signIn({ email: pendingOtp.email, password: pendingOtp.password })
+
+        if (result.session) {
+          navigate(pendingScore ? '/resultado' : '/conta', { replace: true })
+        }
+      } catch {
+        setFormError('Código inválido ou expirado. Solicite um novo código e tente novamente.')
+      } finally {
+        setIsSubmitting(false)
+      }
+
+      return
+    }
 
     const validation = signUpSchema.safeParse(values)
     if (!validation.success) {
@@ -362,11 +550,39 @@ function SignUpPage() {
 
       if (result.session) {
         navigate(pendingScore ? '/resultado' : '/conta', { replace: true })
-      } else {
-        setNotice('Conta criada. Confirme seu e-mail e depois entre para continuar.')
+        return
       }
+
+      setPendingOtp({ email, password })
+      setResendCooldown(30)
+      setNotice('Conta criada. Enviamos um código para o seu e-mail. Digite o código abaixo para confirmar e continuar.')
+      setValues((current) => ({ ...current, otpCode: '' }))
     } catch (error) {
       setFormError(error.message || 'Não foi possível criar a conta.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  async function handleResendCode() {
+    if (!pendingOtp?.email) {
+      return
+    }
+
+    if (resendCooldown > 0) {
+      return
+    }
+
+    setFormError('')
+    setNotice('')
+    setIsSubmitting(true)
+    try {
+      await resendVerificationCode({ email: pendingOtp.email })
+      setResendCooldown(30)
+      setNotice('Um novo código foi enviado para o seu e-mail.')
+      setValues((current) => ({ ...current, otpCode: '' }))
+    } catch (error) {
+      setFormError(error.message || 'Não foi possível reenviar o código.')
     } finally {
       setIsSubmitting(false)
     }
@@ -383,50 +599,101 @@ function SignUpPage() {
         </p>
       )}
       <form className="room-form auth-form" onSubmit={handleSubmit} noValidate>
-        <AuthField
-          autoComplete="nickname"
-          error={fieldErrors.displayName}
-          id="signup-name"
-          label="Nome de exibição"
-          name="displayName"
-          onChange={updateField}
-          type="text"
-          value={values.displayName}
-        />
-        <AuthField
-          autoComplete="email"
-          error={fieldErrors.email}
-          id="signup-email"
-          label="E-mail"
-          name="email"
-          onChange={updateField}
-          type="email"
-          value={values.email}
-        />
-        <AuthField
-          autoComplete="new-password"
-          error={fieldErrors.password}
-          id="signup-password"
-          label="Senha (mínimo 8 caracteres)"
-          name="password"
-          onChange={updateField}
-          type="password"
-          value={values.password}
-        />
-        <AuthField
-          autoComplete="new-password"
-          error={fieldErrors.confirmPassword}
-          id="signup-confirm-password"
-          label="Confirmar senha"
-          name="confirmPassword"
-          onChange={updateField}
-          type="password"
-          value={values.confirmPassword}
-        />
+        {!pendingOtp && (
+          <>
+            <AuthField
+              autoComplete="nickname"
+              error={fieldErrors.displayName}
+              id="signup-name"
+              label="Nome de exibição"
+              name="displayName"
+              onChange={updateField}
+              type="text"
+              value={values.displayName}
+            />
+            <AuthField
+              autoComplete="email"
+              error={fieldErrors.email}
+              id="signup-email"
+              label="E-mail"
+              name="email"
+              onChange={updateField}
+              type="email"
+              value={values.email}
+            />
+            <AuthField
+              autoComplete="new-password"
+              error={fieldErrors.password}
+              id="signup-password"
+              label="Senha (mínimo 8 caracteres)"
+              name="password"
+              onChange={updateField}
+              type="password"
+              value={values.password}
+            />
+            <AuthField
+              autoComplete="new-password"
+              error={fieldErrors.confirmPassword}
+              id="signup-confirm-password"
+              label="Confirmar senha"
+              name="confirmPassword"
+              onChange={updateField}
+              type="password"
+              value={values.confirmPassword}
+            />
+          </>
+        )}
+        {pendingOtp && (
+          <div className="otp-panel">
+            <div className="otp-header">
+              <span className="otp-badge">Código</span>
+              <span className="otp-meta">Recebido em {pendingOtp.email}</span>
+            </div>
+            <AuthField
+              autoComplete="one-time-code"
+              error={fieldErrors.otpCode}
+              id="signup-otp-code"
+              inputMode="numeric"
+              label="Código de confirmação"
+              maxLength={6}
+              name="otpCode"
+              onChange={(event) => {
+                const nextValue = event.target.value.replace(/\D/g, '').slice(0, 6)
+                updateField({ target: { name: 'otpCode', value: nextValue } })
+              }}
+              pattern="[0-9]*"
+              placeholder="123456"
+              type="text"
+              value={values.otpCode}
+            />
+          </div>
+        )}
         {formError && <p className="form-error" role="alert">{formError}</p>}
         {notice && <p className="feature-notice" role="status">{notice}</p>}
+        {pendingOtp && (
+          <div className="otp-actions">
+            <button
+              className="button button-secondary"
+              disabled={isSubmitting || resendCooldown > 0}
+              onClick={handleResendCode}
+              type="button"
+            >
+              {isSubmitting
+                ? 'Enviando código...'
+                : resendCooldown > 0
+                  ? `Enviar outro código (${resendCooldown}s)`
+                  : 'Enviar outro código'}
+            </button>
+          </div>
+        )}
         <button className="button button-primary" disabled={isSubmitting} type="submit">
-          {isSubmitting ? 'Criando conta...' : 'Criar conta'}
+          {isSubmitting
+            ? pendingOtp
+              ? 'Validando código...'
+              : 'Criando conta...'
+            : pendingOtp
+              ? 'Confirmar código'
+              : 'Criar conta'}
         </button>
       </form>
       <p className="auth-switch">
@@ -735,7 +1002,7 @@ function RoomWaitingPage() {
       {room && (
         <>
           <p className="page-description">
-            Compartilhe o código com seus amigos. A lista de participantes atualiza em tempo real.
+            Compartilhe o código com seus amigos. A sala aceita dois ou mais jogadores simultaneamente, e a lista de participantes atualiza em tempo real.
           </p>
           <div className="invite-code-panel">
             <span>Código de convite</span>
@@ -766,7 +1033,7 @@ function RoomWaitingPage() {
               <p className="field-hint">
                 {players.length < 2
                   ? 'Aguarde a entrada de pelo menos mais um jogador.'
-                  : 'Todos os participantes jogarão ao mesmo tempo com a mesma palavra.'}
+                  : 'Cada participante receberá uma palavra diferente, no mesmo nível de dificuldade.'}
               </p>
               <button
                 className="button button-primary"
@@ -820,12 +1087,15 @@ function HangmanFigure({ errors }) {
   )
 }
 
-function RoundPage() {
+function RoundPage({ soundEnabled }) {
   const { roomId } = useParams()
   const navigate = useNavigate()
   const { setPendingScore } = useAuth()
   const [round, setRound] = useState(null)
   const [seconds, setSeconds] = useState(0)
+  const [countdown, setCountdown] = useState(3)
+  const [lastFeedback, setLastFeedback] = useState('')
+  const [isPaused, setIsPaused] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -840,6 +1110,32 @@ function RoundPage() {
           setRound(nextRound)
           setSeconds(nextRound.elapsed_seconds)
           setError('')
+
+          if (nextRound.status === 'in_progress') {
+            setCountdown(3)
+            setIsPaused(false)
+            setLastFeedback((current) => (current ? '' : current))
+          } else {
+            setCountdown(0)
+          }
+
+          if (nextRound.status === 'won' || nextRound.status === 'lost') {
+            setPendingScore((currentScore) => (
+              currentScore?.roomId === roomId
+                ? currentScore
+                : {
+                    roomId,
+                    status: nextRound.status,
+                    difficulty: nextRound.difficulty,
+                    elapsedSeconds: nextRound.elapsed_seconds,
+                    errors: nextRound.errors,
+                  }
+            ))
+          }
+
+          if (nextRound.status === 'lost' && nextRound.elapsed_seconds >= ROUND_TIME_LIMIT_SECONDS) {
+            setLastFeedback('Tempo esgotado! A rodada terminou.')
+          }
         }
       } catch (requestError) {
         if (active) {
@@ -883,10 +1179,35 @@ function RoundPage() {
       active = false
       unsubscribe?.()
     }
-  }, [roomId])
+  }, [roomId, setPendingScore])
+
+  const isRoundInProgress = round?.status === 'in_progress'
 
   useEffect(() => {
-    if (round?.status !== 'in_progress') {
+    if (!isRoundInProgress) {
+      return undefined
+    }
+
+    const countdownTimer = window.setInterval(() => {
+      setCountdown((current) => {
+        if (current <= 1) {
+          window.clearInterval(countdownTimer)
+          return 0
+        }
+
+        return current - 1
+      })
+    }, 1000)
+
+    return () => window.clearInterval(countdownTimer)
+  }, [isRoundInProgress, round?.room_id])
+
+  const isFinished = round?.status === 'won' || round?.status === 'lost'
+  const isTimeExpired = round?.status === 'in_progress' && !isPaused && countdown === 0 && seconds >= ROUND_TIME_LIMIT_SECONDS
+  const canGuess = round?.status === 'in_progress' && !isPaused && countdown === 0 && !isTimeExpired
+
+  useEffect(() => {
+    if (round?.status !== 'in_progress' || countdown > 0 || isPaused || isTimeExpired) {
       return undefined
     }
 
@@ -895,10 +1216,10 @@ function RoundPage() {
     }, 1000)
 
     return () => window.clearInterval(timerId)
-  }, [round?.status])
+  }, [countdown, isPaused, isTimeExpired, round?.status])
 
   async function handleGuess(letter) {
-    if (!round || round.status !== 'in_progress' || isSubmitting) {
+    if (!round || round.status !== 'in_progress' || isSubmitting || isPaused || countdown > 0) {
       return
     }
 
@@ -909,6 +1230,12 @@ function RoundPage() {
       const nextRound = await submitGuess(roomId, letter)
       setRound(nextRound)
       setSeconds(nextRound.elapsed_seconds)
+      const isCorrect = Boolean(nextRound.letter_correct)
+      setLastFeedback(isCorrect ? `Acertou: a letra ${letter} está na palavra.` : `Errou: a letra ${letter} não aparece.`)
+
+      if (soundEnabled) {
+        playTone({ enabled: true, frequency: isCorrect ? 660 : 200, duration: isCorrect ? 0.12 : 0.18, type: isCorrect ? 'triangle' : 'sawtooth' })
+      }
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível registrar seu palpite.')
     } finally {
@@ -917,29 +1244,13 @@ function RoundPage() {
   }
 
   const elapsedLabel = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const timeRemainingLabel = `${String(Math.floor(Math.max(0, ROUND_TIME_LIMIT_SECONDS - seconds) / 60)).padStart(2, '0')}:${String(Math.max(0, ROUND_TIME_LIMIT_SECONDS - seconds) % 60).padStart(2, '0')}`
   const guessedLetters = new Set([
     ...(round?.correct_letters ?? []),
     ...(round?.incorrect_letters ?? []),
   ])
-  const isFinished = round?.status === 'won' || round?.status === 'lost'
+  const isCountdownActive = round?.status === 'in_progress' && countdown > 0
 
-  useEffect(() => {
-    if (!isFinished) {
-      return
-    }
-
-    setPendingScore((currentScore) => (
-      currentScore?.roomId === roomId
-        ? currentScore
-        : {
-            roomId,
-            status: round.status,
-            difficulty: round.difficulty,
-            elapsedSeconds: round.elapsed_seconds,
-            errors: round.errors,
-          }
-    ))
-  }, [isFinished, roomId, round, setPendingScore])
 
   return (
     <section className="page-card round-card" aria-labelledby="round-title">
@@ -953,10 +1264,34 @@ function RoundPage() {
 
       {round && (
         <>
+          {isCountdownActive && (
+            <div className="feature-notice" role="status">
+              A rodada começa em {countdown}s
+            </div>
+          )}
+
+          {isPaused && (
+            <div className="feature-notice" role="status">
+              Partida pausada. Retome quando quiser continuar.
+            </div>
+          )}
+
+          {lastFeedback && !isCountdownActive && !isPaused && (
+            <div className={`feedback-banner ${lastFeedback.includes('Acertou') ? 'feedback-correct' : 'feedback-incorrect'}`} role="status">
+              {lastFeedback}
+            </div>
+          )}
+
+          {isTimeExpired && (
+            <div className="feature-notice" role="status">
+              Tempo esgotado: a rodada encerrou por limite de tempo.
+            </div>
+          )}
+
           <div className="round-stats">
             <div><span>Tempo</span><strong>{elapsedLabel}</strong></div>
             <div><span>Erros</span><strong>{round.errors}/{round.max_errors}</strong></div>
-            <div><span>Nível</span><strong>{difficulties.find(({ value }) => value === round.difficulty)?.label}</strong></div>
+            <div><span>Restante</span><strong>{timeRemainingLabel}</strong></div>
           </div>
 
           <HangmanFigure errors={round.errors} />
@@ -977,6 +1312,18 @@ function RoundPage() {
             </div>
           )}
 
+          <div className="round-actions">
+            {round.status === 'in_progress' && (
+              <button
+                className="button button-secondary"
+                onClick={() => setIsPaused((current) => !current)}
+                type="button"
+              >
+                {isPaused ? 'Retomar partida' : 'Pausar partida'}
+              </button>
+            )}
+          </div>
+
           <div className="letter-keyboard" aria-label="Teclado de letras">
             {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
               const isGuessed = guessedLetters.has(letter)
@@ -986,7 +1333,7 @@ function RoundPage() {
                 <button
                   aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
                   className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
-                  disabled={isGuessed || round.status !== 'in_progress' || isSubmitting}
+                  disabled={isGuessed || !canGuess || isSubmitting}
                   key={letter}
                   onClick={() => void handleGuess(letter)}
                   type="button"
@@ -998,13 +1345,29 @@ function RoundPage() {
           </div>
 
           {isFinished && (
-            <button
-              className="button button-primary"
-              onClick={() => navigate('/salas')}
-              type="button"
-            >
-              Ver resultado
-            </button>
+            <div className="action-row">
+              <button
+                className="button button-primary"
+                onClick={() => navigate('/resultado')}
+                type="button"
+              >
+                Ver resultado
+              </button>
+              <button
+                className="button button-secondary"
+                onClick={() => navigate('/salas')}
+                type="button"
+              >
+                Jogar novamente
+              </button>
+              <button
+                className="button button-secondary"
+                onClick={() => navigate('/')}
+                type="button"
+              >
+                Voltar ao menu
+              </button>
+            </div>
           )}
         </>
       )}
@@ -1020,9 +1383,15 @@ function HomePage() {
       <p className="page-description">
         Descubra a palavra, desafie seus amigos e tente terminar a rodada no menor tempo.
       </p>
+      <ul className="home-instructions" aria-label="Instruções básicas do jogo">
+        <li>Crie ou entre em uma sala com um código.</li>
+        <li>Escolha o nível de dificuldade antes de iniciar.</li>
+        <li>Tente adivinhar a palavra antes que o tempo ou os erros acabem.</li>
+        <li>Acompanhe a pontuação e o ranking ao final da partida.</li>
+      </ul>
       <div className="home-actions">
         <NavLink className="button button-primary" to="/salas">Iniciar jogo</NavLink>
-        <NavLink className="button button-secondary" to="/ranking">Ver ranking</NavLink>
+        <NavLink className="button button-secondary" to="/ranking">Ranking</NavLink>
       </div>
     </section>
   )
@@ -1039,7 +1408,7 @@ function NotFoundPage() {
   )
 }
 
-function AppLayout() {
+function AppLayout({ theme, setTheme, soundEnabled, setSoundEnabled }) {
   const { session } = useAuth()
 
   return (
@@ -1067,17 +1436,11 @@ function AppLayout() {
           <Route path="/resultado" element={<ResultPage />} />
           <Route path="/ranking" element={<RankingPage />} />
           <Route path="/conta" element={<ProtectedAccountRoute />} />
+          <Route path="/configuracoes" element={<SettingsPage theme={theme} setTheme={setTheme} soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled} />} />
           <Route path="/salas/criar" element={<RoomSetupPage action="criar" />} />
           <Route path="/salas/entrar" element={<RoomSetupPage action="entrar" />} />
-          <Route path="/salas/:roomId/jogo" element={<RoundPage />} />
+          <Route path="/salas/:roomId/jogo" element={<RoundPage soundEnabled={soundEnabled} />} />
           <Route path="/salas/:roomId" element={<RoomWaitingPage />} />
-          {pages.map(({ path, title, description }) => (
-            <Route
-              key={path}
-              path={path}
-              element={<PagePlaceholder title={title} description={description} />}
-            />
-          ))}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </main>
@@ -1086,10 +1449,27 @@ function AppLayout() {
 }
 
 function App() {
+  const [theme, setTheme] = useState(() => readStoredValue('forca-theme', 'dark'))
+  const [soundEnabled, setSoundEnabled] = useState(() => readStoredValue('forca-sound', true))
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    writeStoredValue('forca-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    writeStoredValue('forca-sound', soundEnabled)
+  }, [soundEnabled])
+
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AppLayout />
+        <AppLayout
+          setSoundEnabled={setSoundEnabled}
+          setTheme={setTheme}
+          soundEnabled={soundEnabled}
+          theme={theme}
+        />
       </AuthProvider>
     </BrowserRouter>
   )

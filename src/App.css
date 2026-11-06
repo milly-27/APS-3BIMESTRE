@@ -114,11 +114,80 @@
   line-height: 1.7;
 }
 
+.home-instructions {
+  margin: 24px 0 0;
+  padding-left: 18px;
+  color: var(--color-muted);
+  line-height: 1.8;
+}
+
+.settings-list {
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+}
+
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.settings-item div {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-item strong {
+  color: var(--color-text);
+}
+
+.settings-item span {
+  color: var(--color-muted);
+  font-size: 0.82rem;
+}
+
+.achievement-box {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid rgba(164, 150, 255, 0.2);
+  border-radius: 12px;
+  background: rgba(101, 72, 239, 0.08);
+}
+
+.achievement-box h2 {
+  margin: 0 0 12px;
+  color: var(--color-text);
+  font-size: 1rem;
+}
+
+.achievement-box ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+  color: var(--color-muted);
+}
+
+.achievement-box li {
+  display: grid;
+  gap: 2px;
+}
+
+.achievement-box strong {
+  color: var(--color-text);
+}
+
 .home-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 32px;
+  margin-top: 28px;
 }
 
 .button {
@@ -315,6 +384,49 @@
   font-size: 0.88rem;
   line-height: 1.6;
   background: rgba(101, 72, 239, 0.08);
+}
+
+.otp-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(164, 150, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(101, 72, 239, 0.06);
+}
+
+.otp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.otp-badge {
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #eae4ff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(137, 112, 255, 0.2);
+}
+
+.otp-meta {
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.otp-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.otp-actions .button {
+  margin-top: 0;
 }
 
 .room-form {
@@ -678,6 +790,44 @@
 
 .round-result.lost strong {
   color: #ff9ca8;
+}
+
+.feedback-banner {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.feedback-correct {
+  border: 1px solid rgba(83, 211, 155, 0.35);
+  color: #a5f2ce;
+  background: rgba(33, 135, 92, 0.14);
+}
+
+.feedback-incorrect {
+  border: 1px solid rgba(255, 107, 124, 0.35);
+  color: #ff9ca8;
+  background: rgba(145, 35, 57, 0.14);
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.action-row .button {
+  margin-top: 0;
+}
+
+.round-actions {
+  display: flex;
+  justify-content: center;
+  margin: 18px 0 10px;
 }
 
 .round-card > .button {
