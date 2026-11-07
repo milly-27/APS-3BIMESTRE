@@ -9,7 +9,7 @@ Jogo da forca em React + Vite com salas online, multiplayer em tempo real e rank
 - Cada jogador recebe uma palavra diferente no mesmo nível de dificuldade
 - Seleção de dificuldade: fácil, médio, difícil e especialista
 - Contagem regressiva e fim de rodada por tempo
-- Sistema de pontuação e ranking
+- Registro de vitórias solo no ranking online via Supabase
 - Tweaks de interface: tema, som, pausa e reinício
 
 ## Tecnologias

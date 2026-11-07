@@ -98,6 +98,14 @@ export function guessLetter(round, input) {
   }
 }
 
+export function expireRound(round) {
+  if (round.status !== 'in_progress') {
+    return round
+  }
+
+  return { ...round, status: 'lost' }
+}
+
 export function calculateScore({ difficulty, elapsedSeconds, errors, won }) {
   if (!Object.hasOwn(DIFFICULTY_RANGES, difficulty)) {
     throw new TypeError('Selecione um nível de dificuldade válido.')

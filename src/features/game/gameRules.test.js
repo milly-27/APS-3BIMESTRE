@@ -4,6 +4,7 @@ import {
   calculateScore,
   compareResults,
   createRound,
+  expireRound,
   getDifficultyForWord,
   guessLetter,
   MAX_ERRORS,
@@ -23,6 +24,21 @@ test('normalizes accented letters for comparison without changing display words'
   assert.equal(afterGuess.word, 'AÇÃO')
   assert.deepEqual(afterGuess.correctGuesses, ['C'])
   assert.equal(afterGuess.status, 'in_progress')
+})
+
+test('expires an active round and leaves finished rounds unchanged', () => {
+  const activeRound = createRound('gato')
+  const expiredRound = expireRound(activeRound)
+
+  assert.equal(expiredRound.status, 'lost')
+  assert.equal(expiredRound.word, activeRound.word)
+  assert.equal(expireRound(expiredRound), expiredRound)
+
+  const wonRound = ['g', 'a', 't', 'o'].reduce(
+    (round, letter) => guessLetter(round, letter),
+    createRound('gato'),
+  )
+  assert.equal(expireRound(wonRound), wonRound)
 })
 
 test('classifies word lengths using the agreed difficulty ranges', () => {
