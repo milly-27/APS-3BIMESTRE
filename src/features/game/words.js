@@ -1,4 +1,4 @@
-import { DIFFICULTY_RANGES, getDifficultyForWord } from './gameRules.js'
+import { DIFFICULTY_RANGES, getDifficultyForWord, normalizeWord } from './gameRules.js'
 
 export const WORDS_BY_DIFFICULTY = Object.freeze({
   easy: Object.freeze([
@@ -55,6 +55,23 @@ export function getWordsForDifficulty(difficulty) {
 }
 
 export function chooseWord(difficulty, random = Math.random) {
+  const words = getWordsForDifficulty(difficulty)
+  return chooseWordFromList(difficulty, words, random)
+}
+
+export function chooseDifferentWord(difficulty, previousWord, random = Math.random) {
+  const previousNormalizedWord = normalizeWord(previousWord)
+  const words = getWordsForDifficulty(difficulty)
+  const alternativeWords = words.filter((word) => normalizeWord(word) !== previousNormalizedWord)
+
+  return chooseWordFromList(
+    difficulty,
+    alternativeWords.length > 0 ? alternativeWords : words,
+    random,
+  )
+}
+
+function chooseWordFromList(difficulty, words, random) {
   if (typeof random !== 'function') {
     throw new TypeError('O seletor aleatório precisa ser uma função.')
   }
@@ -65,7 +82,6 @@ export function chooseWord(difficulty, random = Math.random) {
     throw new RangeError('O seletor aleatório deve retornar um valor entre 0 e 1.')
   }
 
-  const words = getWordsForDifficulty(difficulty)
   const selectedWord = words[Math.floor(value * words.length)]
 
   if (getDifficultyForWord(selectedWord) !== difficulty) {

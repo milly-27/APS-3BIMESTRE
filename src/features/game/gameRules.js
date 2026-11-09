@@ -14,6 +14,77 @@ export const DIFFICULTY_LABELS = Object.freeze({
   expert: 'Muito Difícil',
 })
 
+export const ACHIEVEMENTS = Object.freeze([
+  Object.freeze({ id: 'victory', title: 'Vitória', description: 'Conquistou uma rodada.' }),
+  Object.freeze({ id: 'perfect', title: 'Sem erros', description: 'Venceu sem errar nenhuma letra.' }),
+  Object.freeze({ id: 'speed', title: 'Resposta rápida', description: 'Terminou a rodada em 30 segundos ou menos.' }),
+  Object.freeze({ id: 'survivor', title: 'Persistência', description: 'Ainda tentou até o fim da rodada.' }),
+])
+
+export function getElapsedMilliseconds({ elapsedBeforeSegment, segmentStartedAt, now }) {
+  if (
+    !Number.isFinite(elapsedBeforeSegment)
+    || elapsedBeforeSegment < 0
+    || !Number.isFinite(segmentStartedAt)
+    || segmentStartedAt < 0
+    || !Number.isFinite(now)
+    || now < segmentStartedAt
+  ) {
+    throw new TypeError('Os horários da partida precisam ser válidos.')
+  }
+
+  return Math.floor(elapsedBeforeSegment + now - segmentStartedAt)
+}
+
+export function getAchievementList(result) {
+  if (result === null || result === undefined) {
+    return []
+  }
+
+  if (
+    !['won', 'lost'].includes(result.status)
+    || !Number.isFinite(result.elapsedSeconds)
+    || result.elapsedSeconds < 0
+    || !Number.isInteger(result.errors)
+    || result.errors < 0
+    || result.errors > MAX_ERRORS
+  ) {
+    throw new TypeError('O resultado precisa ter status, tempo e erros válidos para calcular conquistas.')
+  }
+
+  const earnedIds = new Set()
+  if (result.status === 'won') {
+    earnedIds.add('victory')
+
+    if (result.errors === 0) {
+      earnedIds.add('perfect')
+    }
+
+    if (result.elapsedSeconds <= 30) {
+      earnedIds.add('speed')
+    }
+  } else {
+    earnedIds.add('survivor')
+  }
+
+  return ACHIEVEMENTS.filter(({ id }) => earnedIds.has(id))
+}
+
+export function mergeAchievementIds(existingIds, earnedIds) {
+  if (!Array.isArray(existingIds) || !Array.isArray(earnedIds)) {
+    throw new TypeError('As conquistas existentes e novas precisam ser listas.')
+  }
+
+  const knownIds = new Set(ACHIEVEMENTS.map(({ id }) => id))
+  const unlockedIds = new Set(
+    [...existingIds, ...earnedIds].filter((id) => knownIds.has(id)),
+  )
+
+  return ACHIEVEMENTS
+    .filter(({ id }) => unlockedIds.has(id))
+    .map(({ id }) => id)
+}
+
 export function normalizeWord(word) {
   if (typeof word !== 'string' || word.trim().length === 0) {
     throw new TypeError('A palavra precisa ser um texto não vazio.')

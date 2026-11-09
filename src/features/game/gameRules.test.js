@@ -1,16 +1,21 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  ACHIEVEMENTS,
   calculateScore,
   compareResults,
   createRound,
   expireRound,
+  getAchievementList,
+  getElapsedMilliseconds,
   getDifficultyForWord,
   guessLetter,
+  mergeAchievementIds,
   MAX_ERRORS,
   normalizeWord,
 } from './gameRules.js'
 import {
+  chooseDifferentWord,
   chooseWord,
   getWordsForDifficulty,
 } from './words.js'
@@ -41,6 +46,74 @@ test('expires an active round and leaves finished rounds unchanged', () => {
   assert.equal(expireRound(wonRound), wonRound)
 })
 
+test('preserves guesses and prevents changes after a round expires', () => {
+  const guessedRound = guessLetter(guessLetter(createRound('gato'), 'a'), 'b')
+  const expiredRound = expireRound(guessedRound)
+
+  assert.equal(expiredRound.status, 'lost')
+  assert.deepEqual(expiredRound.correctGuesses, ['A'])
+  assert.deepEqual(expiredRound.incorrectGuesses, ['B'])
+  assert.equal(guessLetter(expiredRound, 'g'), expiredRound)
+})
+
+test('starts a replay with a fresh round state', () => {
+  const finishedRound = expireRound(guessLetter(createRound('gato'), 'b'))
+  const replayRound = createRound('casa')
+
+  assert.equal(finishedRound.status, 'lost')
+  assert.equal(replayRound.status, 'in_progress')
+  assert.equal(replayRound.word, 'CASA')
+  assert.deepEqual(replayRound.correctGuesses, [])
+  assert.deepEqual(replayRound.incorrectGuesses, [])
+  assert.equal(replayRound.maxErrors, MAX_ERRORS)
+})
+
+test('calculates elapsed time across pause and resume segments', () => {
+  const elapsedWhenPaused = getElapsedMilliseconds({
+    elapsedBeforeSegment: 0,
+    segmentStartedAt: 1000,
+    now: 2250,
+  })
+  const elapsedAfterResume = getElapsedMilliseconds({
+    elapsedBeforeSegment: elapsedWhenPaused,
+    segmentStartedAt: 10000,
+    now: 11750,
+  })
+
+  assert.equal(elapsedWhenPaused, 1250)
+  assert.equal(elapsedAfterResume, 3000)
+  assert.throws(() => getElapsedMilliseconds({
+    elapsedBeforeSegment: 0,
+    segmentStartedAt: 10000,
+    now: 9999,
+  }), TypeError)
+})
+
+test('awards achievements according to win, errors, time, and loss', () => {
+  assert.deepEqual(
+    getAchievementList({ status: 'won', elapsedSeconds: 30, errors: 0 }),
+    ACHIEVEMENTS.slice(0, 3),
+  )
+  assert.deepEqual(
+    getAchievementList({ status: 'won', elapsedSeconds: 31, errors: 1 }),
+    [ACHIEVEMENTS[0]],
+  )
+  assert.deepEqual(
+    getAchievementList({ status: 'lost', elapsedSeconds: 90, errors: 10 }),
+    [ACHIEVEMENTS[3]],
+  )
+  assert.deepEqual(getAchievementList(null), [])
+  assert.throws(() => getAchievementList({ status: 'lost', elapsedSeconds: -1, errors: 0 }), TypeError)
+})
+
+test('merges achievement identifiers without duplicates or unknown values', () => {
+  assert.deepEqual(
+    mergeAchievementIds(['speed', 'unknown', 'victory'], ['victory', 'survivor']),
+    ['victory', 'speed', 'survivor'],
+  )
+  assert.throws(() => mergeAchievementIds(null, []), TypeError)
+})
+
 test('classifies word lengths using the agreed difficulty ranges', () => {
   assert.equal(getDifficultyForWord('sol'), 'easy')
   assert.equal(getDifficultyForWord('vento'), 'easy')
@@ -64,6 +137,19 @@ test('all curated words match their difficulty and selection stays in range', ()
 
     assert.equal(chooseWord(difficulty, () => 0), words[0])
     assert.equal(chooseWord(difficulty, () => 0.999999), words.at(-1))
+  }
+})
+
+test('replay chooses a different word within the same difficulty', () => {
+  for (const difficulty of ['easy', 'medium', 'hard', 'expert']) {
+    const words = getWordsForDifficulty(difficulty)
+    const nextWord = chooseDifferentWord(difficulty, words[0], () => 0)
+    const lastAlternative = chooseDifferentWord(difficulty, words[0], () => 0.999999)
+
+    assert.equal(nextWord, words[1])
+    assert.notEqual(nextWord, words[0])
+    assert.equal(lastAlternative, words.at(-1))
+    assert.equal(getDifficultyForWord(nextWord), difficulty)
   }
 })
 

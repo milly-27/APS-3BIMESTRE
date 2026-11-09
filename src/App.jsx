@@ -29,10 +29,13 @@ import {
   calculateScore,
   createRound,
   expireRound,
+  getAchievementList,
+  getElapsedMilliseconds,
   guessLetter,
+  mergeAchievementIds,
   normalizeWord,
 } from './features/game/gameRules.js'
-import { chooseWord, isSupportedDifficulty } from './features/game/words.js'
+import { chooseDifferentWord, chooseWord, isSupportedDifficulty } from './features/game/words.js'
 import './App.css'
 
 const difficulties = [
@@ -43,9 +46,41 @@ const difficulties = [
 ]
 
 const ROUND_TIME_LIMIT_SECONDS = 90
+const ACHIEVEMENTS_STORAGE_KEY = 'forca-achievements'
 
 function formatElapsedTime(seconds) {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function useLetterKeyboard(enabled, onGuess) {
+  useEffect(() => {
+    if (!enabled) {
+      return undefined
+    }
+
+    function handleKeyDown(event) {
+      const target = event.target
+      if (
+        event.altKey
+        || event.ctrlKey
+        || event.metaKey
+        || event.repeat
+        || event.isComposing
+        || (target instanceof HTMLElement
+          && (target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"]')))
+      ) {
+        return
+      }
+
+      const letter = event.key.toLocaleUpperCase('pt-BR')
+      if (/^[A-Z]$/.test(letter)) {
+        onGuess(letter)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [enabled, onGuess])
 }
 
 function readStoredValue(key, fallback) {
@@ -63,13 +98,14 @@ function readStoredValue(key, fallback) {
 
 function writeStoredValue(key, value) {
   if (typeof window === 'undefined') {
-    return
+    return false
   }
 
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
+    return true
   } catch {
-    // Ignora falhas por limitação de armazenamento do navegador.
+    return false
   }
 }
 
@@ -102,33 +138,7 @@ function playTone({ enabled, frequency, duration = 0.12, type = 'sine' }) {
   }, duration * 1000)
 }
 
-function getAchievementList(result) {
-  if (!result) {
-    return []
-  }
-
-  const achievements = []
-
-  if (result.status === 'won') {
-    achievements.push({ id: 'victory', title: 'Vitória', description: 'Conquistou uma rodada.' })
-  }
-
-  if (result.errors === 0 && result.status === 'won') {
-    achievements.push({ id: 'perfect', title: 'Sem erros', description: 'Venceu sem errar nenhuma letra.' })
-  }
-
-  if (result.elapsedSeconds <= 30 && result.status === 'won') {
-    achievements.push({ id: 'speed', title: 'Resposta rápida', description: 'Terminou a rodada em 30 segundos ou menos.' })
-  }
-
-  if (result.status === 'lost') {
-    achievements.push({ id: 'survivor', title: 'Persistência', description: 'Ainda tentou até o fim da rodada.' })
-  }
-
-  return achievements
-}
-
-function SettingsPage({ theme, setTheme, soundEnabled, setSoundEnabled }) {
+function SettingsPage({ theme, setTheme, soundEnabled, setSoundEnabled, hasStorageError }) {
   const navigate = useNavigate()
   const location = useLocation()
   const dialogRef = useRef(null)
@@ -161,6 +171,30 @@ function SettingsPage({ theme, setTheme, soundEnabled, setSoundEnabled }) {
         aria-labelledby="settings-title"
         aria-modal="true"
         className="settings-dialog"
+        onKeyDown={(event) => {
+          if (event.key !== 'Tab') {
+            return
+          }
+
+          const focusableElements = dialogRef.current?.querySelectorAll(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )
+          const firstElement = focusableElements?.[0]
+          const lastElement = focusableElements?.[focusableElements.length - 1]
+
+          if (!firstElement || !lastElement) {
+            event.preventDefault()
+          } else if (
+            event.shiftKey
+            && (document.activeElement === firstElement || document.activeElement === dialogRef.current)
+          ) {
+            event.preventDefault()
+            lastElement.focus()
+          } else if (!event.shiftKey && document.activeElement === lastElement) {
+            event.preventDefault()
+            firstElement.focus()
+          }
+        }}
         ref={dialogRef}
         role="dialog"
         tabIndex="-1"
@@ -209,7 +243,7 @@ function SettingsPage({ theme, setTheme, soundEnabled, setSoundEnabled }) {
               aria-describedby="settings-sound-description"
               aria-labelledby="settings-sound-label"
               className="settings-toggle"
-              onClick={() => setSoundEnabled((current) => !current)}
+              onClick={() => setSoundEnabled(!soundEnabled)}
               role="switch"
               type="button"
             >
@@ -218,7 +252,13 @@ function SettingsPage({ theme, setTheme, soundEnabled, setSoundEnabled }) {
           </div>
         </div>
 
-        <p className="settings-note">As alterações são salvas automaticamente neste dispositivo.</p>
+        {hasStorageError ? (
+          <p aria-live="polite" className="settings-note" role="status">
+            Não foi possível salvar as preferências neste navegador. Elas continuam ativas nesta sessão.
+          </p>
+        ) : (
+          <p className="settings-note">As alterações são salvas automaticamente neste dispositivo.</p>
+        )}
       </section>
     </div>
   )
@@ -347,8 +387,6 @@ function ResultPage() {
         won: isWon,
       })
     : null
-  const achievements = getAchievementList(displayedResult)
-
   useEffect(() => {
     if (!pendingScore || pendingScore.status !== 'won' || !isRegisteredUser || !displayName) {
       return undefined
@@ -463,19 +501,6 @@ function ResultPage() {
       {isSaving && <p className="page-description" aria-live="polite">Registrando resultado...</p>}
       {notice && <p className="feature-notice" role="status">{notice}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      {achievements.length > 0 && (
-        <details className="achievement-box">
-          <summary>Conquistas ({achievements.length})</summary>
-          <ul>
-            {achievements.map((achievement) => (
-              <li key={achievement.id}>
-                <strong>{achievement.title}</strong>
-                <span>{achievement.description}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
       <div className="endgame-actions">
         <Link className="button button-primary" to={isSoloResult ? '/solo' : '/salas'}>Jogar novamente</Link>
         <Link className="button button-secondary" to="/">Voltar ao menu</Link>
@@ -1482,6 +1507,8 @@ function RoundPage({ soundEnabled }) {
   const isTimeExpired = round?.status === 'in_progress' && !isPaused && countdown === 0 && seconds >= ROUND_TIME_LIMIT_SECONDS
   const canGuess = round?.status === 'in_progress' && !isPaused && countdown === 0 && !isTimeExpired
 
+  useLetterKeyboard(canGuess && !isSubmitting, handleGuess)
+
   useEffect(() => {
     if (round?.status !== 'in_progress' || countdown > 0 || isPaused || isTimeExpired) {
       return undefined
@@ -1525,6 +1552,7 @@ function RoundPage({ soundEnabled }) {
     ...(round?.correct_letters ?? []),
     ...(round?.incorrect_letters ?? []),
   ])
+  const maskedWord = Array.from(round?.masked_word ?? '')
   const isCountdownActive = round?.status === 'in_progress' && countdown > 0
 
 
@@ -1582,8 +1610,12 @@ function RoundPage({ soundEnabled }) {
           <div className="round-play-layout">
             <div className="round-visual-panel">
               <HangmanFigure errors={round.errors} />
-              <div className="word-display" aria-label="Palavra oculta">
-                {Array.from(round.masked_word ?? '').map((letter, index) => (
+              <div
+                className="word-display"
+                aria-label="Palavra oculta"
+                style={{ '--word-length': maskedWord.length }}
+              >
+                {maskedWord.map((letter, index) => (
                   <span className="word-letter" key={`${index}-${letter}`}>
                     {letter === '_' ? '' : letter}
                   </span>
@@ -1596,7 +1628,13 @@ function RoundPage({ soundEnabled }) {
                 <h2>Escolha uma letra</h2>
                 <span>{26 - guessedLetters.size} disponíveis</span>
               </div>
-              <div className="letter-keyboard" aria-label="Teclado de letras">
+              <p className="round-keyboard-hint" id="round-keyboard-hint">Clique ou digite uma letra de A a Z.</p>
+              <div
+                aria-describedby="round-keyboard-hint"
+                aria-label="Teclado de letras"
+                className="letter-keyboard"
+                role="group"
+              >
                 {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
                   const isGuessed = guessedLetters.has(letter)
                   const isCorrect = round.correct_letters?.includes(letter)
@@ -1604,6 +1642,7 @@ function RoundPage({ soundEnabled }) {
                   return (
                     <button
                       aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
+                      aria-keyshortcuts={letter.toLowerCase()}
                       className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
                       disabled={isGuessed || !canGuess || isSubmitting}
                       key={letter}
@@ -1717,6 +1756,7 @@ function SoloSetupPage() {
 }
 
 function RoundResultDialog({
+  achievementStorageError,
   difficulty,
   elapsedSeconds,
   errors,
@@ -1746,6 +1786,36 @@ function RoundResultDialog({
         aria-labelledby="round-result-title"
         aria-modal="true"
         className={`round-result-dialog ${isWon ? 'won' : 'lost'}`}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            onClose()
+            return
+          }
+
+          if (event.key !== 'Tab') {
+            return
+          }
+
+          const focusableElements = dialogRef.current?.querySelectorAll(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          )
+          const firstElement = focusableElements?.[0]
+          const lastElement = focusableElements?.[focusableElements.length - 1]
+
+          if (!firstElement || !lastElement) {
+            event.preventDefault()
+          } else if (
+            event.shiftKey
+            && (document.activeElement === firstElement || document.activeElement === dialogRef.current)
+          ) {
+            event.preventDefault()
+            lastElement.focus()
+          } else if (!event.shiftKey && document.activeElement === lastElement) {
+            event.preventDefault()
+            firstElement.focus()
+          }
+        }}
         ref={dialogRef}
         role="dialog"
         tabIndex="-1"
@@ -1788,6 +1858,11 @@ function RoundResultDialog({
         <p className="round-result-score">
           {isWon ? '+' : ''}{score} {score === 1 ? 'ponto' : 'pontos'}
         </p>
+        {achievementStorageError && (
+          <p className="feature-notice" role="status">
+            Não foi possível salvar o progresso local neste navegador.
+          </p>
+        )}
         <div className="round-result-actions">
           <button className="button button-primary" onClick={onContinue} type="button">
             {continueLabel}
@@ -1808,13 +1883,28 @@ function SoloRoundPage({ soundEnabled }) {
   const [seconds, setSeconds] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
   const [lastFeedback, setLastFeedback] = useState('')
+  const [achievementStorageError, setAchievementStorageError] = useState(false)
   const roundRef = useRef(round)
-  const secondsRef = useRef(0)
+  const elapsedBeforeSegmentRef = useRef(0)
+  const segmentStartedAtRef = useRef(null)
   const isTimeExpired = seconds >= ROUND_TIME_LIMIT_SECONDS
 
   const finishRound = useCallback((completedRound, elapsedSeconds) => {
     roundRef.current = completedRound
     setRound(completedRound)
+    const earnedAchievements = getAchievementList({
+      status: completedRound.status,
+      elapsedSeconds,
+      errors: completedRound.incorrectGuesses.length,
+    })
+    const storedIds = readStoredValue(ACHIEVEMENTS_STORAGE_KEY, [])
+    const existingIds = Array.isArray(storedIds) ? storedIds : []
+    const earnedIds = earnedAchievements.map(({ id }) => id)
+    const unlockedIds = mergeAchievementIds(existingIds, earnedIds)
+    const isUnchanged = unlockedIds.length === existingIds.length
+      && unlockedIds.every((id, index) => id === existingIds[index])
+    const wasSaved = isUnchanged || writeStoredValue(ACHIEVEMENTS_STORAGE_KEY, unlockedIds)
+    setAchievementStorageError(!wasSaved)
 
     if (completedRound.status === 'won') {
       setPendingScore({
@@ -1827,27 +1917,50 @@ function SoloRoundPage({ soundEnabled }) {
     }
   }, [difficulty, setPendingScore])
 
+  const getCurrentElapsedMilliseconds = useCallback((now = performance.now()) => {
+    return getElapsedMilliseconds({
+      elapsedBeforeSegment: elapsedBeforeSegmentRef.current,
+      segmentStartedAt: segmentStartedAtRef.current ?? now,
+      now,
+    })
+  }, [])
+
   useEffect(() => {
     if (round?.status !== 'in_progress' || isPaused || isTimeExpired) {
       return undefined
     }
 
-    const timerId = window.setInterval(() => {
-      const elapsedSeconds = Math.min(secondsRef.current + 1, ROUND_TIME_LIMIT_SECONDS)
-      secondsRef.current = elapsedSeconds
-      setSeconds(elapsedSeconds)
+    if (segmentStartedAtRef.current === null) {
+      segmentStartedAtRef.current = performance.now()
+    }
 
-      if (elapsedSeconds === ROUND_TIME_LIMIT_SECONDS) {
-        const expiredRound = expireRound(roundRef.current)
-        if (expiredRound !== roundRef.current) {
+    const timerId = window.setInterval(() => {
+      const elapsedSeconds = Math.min(
+        Math.floor(getCurrentElapsedMilliseconds() / 1000),
+        ROUND_TIME_LIMIT_SECONDS,
+      )
+      setSeconds((currentSeconds) => (
+        currentSeconds === elapsedSeconds ? currentSeconds : elapsedSeconds
+      ))
+
+      if (elapsedSeconds >= ROUND_TIME_LIMIT_SECONDS) {
+        elapsedBeforeSegmentRef.current = ROUND_TIME_LIMIT_SECONDS * 1000
+        const activeRound = roundRef.current
+        const expiredRound = expireRound(activeRound)
+        if (expiredRound !== activeRound) {
           finishRound(expiredRound, elapsedSeconds)
           setLastFeedback('Tempo esgotado! A rodada terminou.')
         }
       }
-    }, 1000)
+    }, 250)
 
     return () => window.clearInterval(timerId)
-  }, [finishRound, isPaused, isTimeExpired, round?.status])
+  }, [finishRound, getCurrentElapsedMilliseconds, isPaused, isTimeExpired, round?.status])
+
+  useLetterKeyboard(
+    round?.status === 'in_progress' && !isPaused && !isTimeExpired,
+    handleGuess,
+  )
 
   if (!round) {
     return (
@@ -1859,12 +1972,27 @@ function SoloRoundPage({ soundEnabled }) {
   }
 
   function handleGuess(letter) {
-    if (round.status !== 'in_progress' || isPaused || seconds >= ROUND_TIME_LIMIT_SECONDS) {
+    const activeRound = roundRef.current
+    if (activeRound.status !== 'in_progress' || isPaused) {
       return
     }
 
-    const nextRound = guessLetter(round, letter)
-    if (nextRound === round) {
+    const elapsedSeconds = Math.min(
+      Math.floor(getCurrentElapsedMilliseconds() / 1000),
+      ROUND_TIME_LIMIT_SECONDS,
+    )
+    setSeconds(elapsedSeconds)
+
+    if (elapsedSeconds >= ROUND_TIME_LIMIT_SECONDS) {
+      elapsedBeforeSegmentRef.current = ROUND_TIME_LIMIT_SECONDS * 1000
+      const expiredRound = expireRound(activeRound)
+      finishRound(expiredRound, ROUND_TIME_LIMIT_SECONDS)
+      setLastFeedback('Tempo esgotado! A rodada terminou.')
+      return
+    }
+
+    const nextRound = guessLetter(activeRound, letter)
+    if (nextRound === activeRound) {
       return
     }
 
@@ -1872,7 +2000,7 @@ function SoloRoundPage({ soundEnabled }) {
       roundRef.current = nextRound
       setRound(nextRound)
     } else {
-      finishRound(nextRound, seconds)
+      finishRound(nextRound, elapsedSeconds)
     }
     const isCorrect = nextRound.correctGuesses.includes(letter)
     setLastFeedback(isCorrect
@@ -1889,14 +2017,43 @@ function SoloRoundPage({ soundEnabled }) {
     }
   }
 
+  function togglePause() {
+    if (!isPaused) {
+      const elapsedMilliseconds = getCurrentElapsedMilliseconds()
+      elapsedBeforeSegmentRef.current = elapsedMilliseconds
+      const elapsedSeconds = Math.min(
+        Math.floor(elapsedMilliseconds / 1000),
+        ROUND_TIME_LIMIT_SECONDS,
+      )
+      setSeconds(elapsedSeconds)
+
+      if (elapsedSeconds >= ROUND_TIME_LIMIT_SECONDS) {
+        elapsedBeforeSegmentRef.current = ROUND_TIME_LIMIT_SECONDS * 1000
+        const activeRound = roundRef.current
+        const expiredRound = expireRound(activeRound)
+        finishRound(expiredRound, ROUND_TIME_LIMIT_SECONDS)
+        setLastFeedback('Tempo esgotado! A rodada terminou.')
+        return
+      }
+
+      setIsPaused(true)
+      return
+    }
+
+    segmentStartedAtRef.current = performance.now()
+    setIsPaused(false)
+  }
+
   function startNewRound() {
-    const nextRound = createRound(chooseWord(difficulty))
+    const nextRound = createRound(chooseDifferentWord(difficulty, roundRef.current.word))
     roundRef.current = nextRound
-    secondsRef.current = 0
+    elapsedBeforeSegmentRef.current = 0
+    segmentStartedAtRef.current = performance.now()
     setRound(nextRound)
     setSeconds(0)
     setIsPaused(false)
     setLastFeedback('')
+    setAchievementStorageError(false)
   }
 
   const displayRound = round
@@ -1904,6 +2061,12 @@ function SoloRoundPage({ soundEnabled }) {
   const isWon = displayRound.status === 'won'
   const feedback = lastFeedback
   const guessedLetters = new Set([...round.correctGuesses, ...round.incorrectGuesses])
+  const currentScore = calculateScore({
+    difficulty,
+    elapsedSeconds: seconds,
+    errors: round.incorrectGuesses.length,
+    won: isWon,
+  })
   const maskedWord = Array.from(round.word, (letter) => (
     round.correctGuesses.includes(normalizeWord(letter)) ? letter : '_'
   )).join('')
@@ -1929,15 +2092,20 @@ function SoloRoundPage({ soundEnabled }) {
           {feedback}
         </div>
       )}
-      <div className="round-stats" role="group" aria-label="Resumo da partida">
+      <div className="round-stats solo-round-stats" role="group" aria-label="Resumo da partida">
         <div><span>Tempo</span><strong>{formatElapsedTime(seconds)}</strong></div>
         <div><span>Erros</span><strong>{round.incorrectGuesses.length}/{round.maxErrors}</strong></div>
         <div><span>Tempo restante</span><strong>{formatElapsedTime(Math.max(0, ROUND_TIME_LIMIT_SECONDS - seconds))}</strong></div>
+        <div><span>{isFinished ? 'Pontuação final' : 'Pontuação parcial'}</span><strong>{currentScore}</strong></div>
       </div>
       <div className="round-play-layout">
         <div className="round-visual-panel">
           <HangmanFigure errors={round.incorrectGuesses.length} />
-          <div className="word-display" aria-label="Palavra oculta">
+          <div
+            className="word-display"
+            aria-label="Palavra oculta"
+            style={{ '--word-length': maskedWord.length }}
+          >
             {Array.from(maskedWord).map((letter, index) => (
               <span className="word-letter" key={`${index}-${letter}`}>
                 {letter === '_' ? '' : letter}
@@ -1951,7 +2119,13 @@ function SoloRoundPage({ soundEnabled }) {
             <h2>Escolha uma letra</h2>
             <span>{26 - guessedLetters.size} disponíveis</span>
           </div>
-          <div className="letter-keyboard" aria-label="Teclado de letras">
+          <p className="round-keyboard-hint" id="round-keyboard-hint">Clique ou digite uma letra de A a Z.</p>
+          <div
+            aria-describedby="round-keyboard-hint"
+            aria-label="Teclado de letras"
+            className="letter-keyboard"
+            role="group"
+          >
             {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
               const isGuessed = guessedLetters.has(letter)
               const isCorrect = round.correctGuesses.includes(letter)
@@ -1959,6 +2133,7 @@ function SoloRoundPage({ soundEnabled }) {
               return (
                 <button
                   aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
+                  aria-keyshortcuts={letter.toLowerCase()}
                   className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
                   disabled={isGuessed || isFinished || isPaused || isTimeExpired}
                   key={letter}
@@ -1974,7 +2149,7 @@ function SoloRoundPage({ soundEnabled }) {
             <div className="round-actions">
               <button
                 className="button button-secondary"
-                onClick={() => setIsPaused((current) => !current)}
+                onClick={togglePause}
                 type="button"
               >
                 {isPaused ? 'Retomar partida' : 'Pausar partida'}
@@ -1986,6 +2161,7 @@ function SoloRoundPage({ soundEnabled }) {
       {isFinished && (
         <RoundResultDialog
           continueLabel={isWon ? 'Ver resultado' : 'Jogar novamente'}
+          achievementStorageError={achievementStorageError}
           difficulty={difficulty}
           elapsedSeconds={seconds}
           errors={round.incorrectGuesses.length}
@@ -2056,7 +2232,7 @@ function NotFoundPage() {
   )
 }
 
-function AppLayout({ theme, setTheme, soundEnabled, setSoundEnabled }) {
+function AppLayout({ theme, setTheme, soundEnabled, setSoundEnabled, hasStorageError }) {
   const { session } = useAuth()
   const location = useLocation()
   const backgroundLocation = location.state?.backgroundLocation
@@ -2094,7 +2270,7 @@ function AppLayout({ theme, setTheme, soundEnabled, setSoundEnabled }) {
           <Route path="/resultado" element={<ResultPage />} />
           <Route path="/ranking" element={<RankingPage />} />
           <Route path="/conta" element={<ProtectedAccountRoute />} />
-          <Route path="/configuracoes" element={<SettingsPage theme={theme} setTheme={setTheme} soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled} />} />
+          <Route path="/configuracoes" element={<SettingsPage theme={theme} setTheme={setTheme} soundEnabled={soundEnabled} setSoundEnabled={setSoundEnabled} hasStorageError={hasStorageError} />} />
           <Route path="/salas/criar" element={<RoomSetupPage action="criar" />} />
           <Route path="/salas/entrar" element={<RoomSetupPage action="entrar" />} />
           <Route path="/salas/:roomId/jogo" element={<RoundPage soundEnabled={soundEnabled} />} />
@@ -2111,6 +2287,7 @@ function AppLayout({ theme, setTheme, soundEnabled, setSoundEnabled }) {
                   setTheme={setTheme}
                   soundEnabled={soundEnabled}
                   theme={theme}
+                  hasStorageError={hasStorageError}
                 />
               )}
             />
@@ -2124,24 +2301,35 @@ function AppLayout({ theme, setTheme, soundEnabled, setSoundEnabled }) {
 function App() {
   const [theme, setTheme] = useState(() => readStoredValue('forca-theme', 'dark'))
   const [soundEnabled, setSoundEnabled] = useState(() => readStoredValue('forca-sound', true))
+  const [storageFailures, setStorageFailures] = useState({ theme: false, sound: false })
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    writeStoredValue('forca-theme', theme)
   }, [theme])
 
-  useEffect(() => {
-    writeStoredValue('forca-sound', soundEnabled)
-  }, [soundEnabled])
+  const updateTheme = useCallback((nextTheme) => {
+    setTheme(nextTheme)
+    const saved = writeStoredValue('forca-theme', nextTheme)
+    setStorageFailures((current) => ({ ...current, theme: !saved }))
+  }, [])
+
+  const updateSoundEnabled = useCallback((nextSoundEnabled) => {
+    setSoundEnabled(nextSoundEnabled)
+    const saved = writeStoredValue('forca-sound', nextSoundEnabled)
+    setStorageFailures((current) => ({ ...current, sound: !saved }))
+  }, [])
+
+  const hasStorageError = storageFailures.theme || storageFailures.sound
 
   return (
     <BrowserRouter>
       <AuthProvider>
         <AppLayout
-          setSoundEnabled={setSoundEnabled}
-          setTheme={setTheme}
+          setSoundEnabled={updateSoundEnabled}
+          setTheme={updateTheme}
           soundEnabled={soundEnabled}
           theme={theme}
+          hasStorageError={hasStorageError}
         />
       </AuthProvider>
     </BrowserRouter>
