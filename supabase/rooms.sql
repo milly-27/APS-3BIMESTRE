@@ -24,10 +24,8 @@ create table if not exists public.room_word_bank (
 );
 
 create table if not exists public.room_secrets (
-  room_id uuid not null references public.rooms (id) on delete cascade,
-  user_id uuid not null references auth.users (id) on delete cascade,
-  word text not null,
-  primary key (room_id, user_id)
+  room_id uuid primary key references public.rooms (id) on delete cascade,
+  word text not null
 );
 
 create table if not exists public.room_round_players (
@@ -53,9 +51,24 @@ create table if not exists public.leaderboard (
   primary key (user_id, difficulty)
 );
 
+create table if not exists public.room_leaderboard (
+  room_id uuid not null references public.rooms (id) on delete cascade,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  display_name text not null check (char_length(display_name) between 1 and 32),
+  difficulty text not null check (difficulty in ('easy', 'medium', 'hard', 'expert')),
+  elapsed_seconds integer not null check (elapsed_seconds >= 0),
+  errors integer not null check (errors between 0 and 9),
+  updated_at timestamptz not null default now(),
+  primary key (room_id, user_id)
+);
+
 alter table public.leaderboard drop constraint if exists leaderboard_pkey;
 alter table public.leaderboard
   add constraint leaderboard_pkey primary key (user_id, difficulty);
+
+alter table public.room_leaderboard drop constraint if exists room_leaderboard_pkey;
+alter table public.room_leaderboard
+  add constraint room_leaderboard_pkey primary key (room_id, user_id);
 
 alter table public.rooms enable row level security;
 alter table public.room_players enable row level security;
@@ -97,15 +110,22 @@ create policy "Room members can read their participants"
 revoke all on public.rooms, public.room_players from anon, authenticated;
 revoke all on public.room_word_bank, public.room_secrets, public.room_round_players
   from anon, authenticated;
-revoke all on public.leaderboard from anon, authenticated;
+revoke all on public.leaderboard, public.room_leaderboard from anon, authenticated;
 grant select (id, invite_code, host_id, difficulty, status, created_at)
   on public.rooms to authenticated;
 grant select on public.room_players to authenticated;
 grant select on public.leaderboard to anon, authenticated;
+grant select on public.room_leaderboard to anon, authenticated;
 
 drop policy if exists "Anyone can read the leaderboard" on public.leaderboard;
 create policy "Anyone can read the leaderboard"
   on public.leaderboard for select
+  to anon, authenticated
+  using (true);
+
+drop policy if exists "Anyone can read the room leaderboard" on public.room_leaderboard;
+create policy "Anyone can read the room leaderboard"
+  on public.room_leaderboard for select
   to anon, authenticated
   using (true);
 
@@ -151,6 +171,61 @@ begin
         updated_at = excluded.updated_at
     where (excluded.elapsed_seconds, excluded.errors)
       < (public.leaderboard.elapsed_seconds, public.leaderboard.errors);
+
+  get diagnostics v_rows = row_count;
+  return v_rows > 0;
+end;
+$$;
+
+create or replace function public.save_room_ranking_result(
+  p_room_id uuid,
+  p_display_name text,
+  p_difficulty text,
+  p_elapsed_seconds integer,
+  p_errors integer
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_rows integer;
+begin
+  if auth.uid() is null then
+    raise exception using errcode = '28000', message = 'A sessão do jogador não foi encontrada.';
+  end if;
+
+  if p_room_id is null or not exists (
+    select 1 from public.room_players where room_id = p_room_id and user_id = auth.uid()
+  ) then
+    raise exception using errcode = '42501', message = 'Você precisa participar da sala para registrar o resultado.';
+  end if;
+
+  if p_display_name is null or char_length(trim(p_display_name)) not between 1 and 32 then
+    raise exception using errcode = '22023', message = 'O nome deve ter de 1 a 32 caracteres.';
+  end if;
+
+  if p_difficulty is null or p_difficulty not in ('easy', 'medium', 'hard', 'expert')
+    or p_elapsed_seconds is null or p_elapsed_seconds < 0
+    or p_errors is null or p_errors not between 0 and 9 then
+    raise exception using errcode = '22023', message = 'Os dados do resultado da sala são inválidos.';
+  end if;
+
+  insert into public.room_leaderboard (
+    room_id, user_id, display_name, difficulty, elapsed_seconds, errors, updated_at
+  )
+  values (
+    p_room_id, auth.uid(), trim(p_display_name), p_difficulty, p_elapsed_seconds, p_errors, now()
+  )
+  on conflict (room_id, user_id) do update
+    set display_name = excluded.display_name,
+        difficulty = excluded.difficulty,
+        elapsed_seconds = excluded.elapsed_seconds,
+        errors = excluded.errors,
+        updated_at = excluded.updated_at
+    where (excluded.elapsed_seconds, excluded.errors)
+      < (public.room_leaderboard.elapsed_seconds, public.room_leaderboard.errors);
 
   get diagnostics v_rows = row_count;
   return v_rows > 0;
@@ -304,30 +379,19 @@ begin
     raise exception using errcode = '55000', message = 'Aguarde pelo menos mais um jogador antes de iniciar.';
   end if;
 
-  if not exists (
-    select 1 from public.room_word_bank as wb where wb.difficulty = v_room.difficulty
-  ) then
+  select wb.word
+    into v_word
+    from public.room_word_bank as wb
+    where wb.difficulty = v_room.difficulty
+    order by random()
+    limit 1;
+
+  if v_word is null then
     raise exception using errcode = '55000', message = 'Não há palavras cadastradas para esta dificuldade.';
   end if;
 
-  with ranked_words as (
-    select word, row_number() over (order by random()) as word_position
-    from public.room_word_bank
-    where difficulty = v_room.difficulty
-  ),
-  player_order as (
-    select rp.user_id,
-           row_number() over (order by rp.joined_at, rp.user_id) as player_position
-    from public.room_players as rp
-    where rp.room_id = p_room_id
-  )
-  insert into public.room_secrets (room_id, user_id, word)
-  select p_room_id,
-         po.user_id,
-         rw.word
-  from player_order as po
-  join ranked_words as rw
-    on rw.word_position = ((po.player_position - 1) % (select count(*) from ranked_words)) + 1;
+  insert into public.room_secrets (room_id, word)
+    values (p_room_id, v_word);
 
   insert into public.room_round_players (room_id, user_id)
     select p_room_id, rp.user_id
@@ -382,8 +446,7 @@ begin
     into v_word, v_room_status, v_difficulty
     from public.room_secrets as rs
     join public.rooms as r on r.id = rs.room_id
-    where rs.room_id = p_room_id
-      and rs.user_id = auth.uid();
+    where rs.room_id = p_room_id;
 
   if not found then
     raise exception using errcode = 'P0002', message = 'A rodada desta sala ainda não foi iniciada.';
@@ -478,8 +541,7 @@ begin
     into v_word, v_room_status, v_difficulty
     from public.room_secrets as rs
     join public.rooms as r on r.id = rs.room_id
-    where rs.room_id = p_room_id
-      and rs.user_id = auth.uid();
+    where rs.room_id = p_room_id;
 
   if not found then
     raise exception using errcode = '42501', message = 'Você não participa de uma rodada ativa desta sala.';

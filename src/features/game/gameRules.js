@@ -1,3 +1,5 @@
+import { chooseWord } from './words.js'
+
 export const MAX_ERRORS = 10
 
 export const DIFFICULTY_RANGES = Object.freeze({
@@ -6,84 +8,6 @@ export const DIFFICULTY_RANGES = Object.freeze({
   hard: Object.freeze({ min: 9, max: 12 }),
   expert: Object.freeze({ min: 14, max: Infinity }),
 })
-
-export const DIFFICULTY_LABELS = Object.freeze({
-  easy: 'Fácil',
-  medium: 'Médio',
-  hard: 'Difícil',
-  expert: 'Muito Difícil',
-})
-
-export const ACHIEVEMENTS = Object.freeze([
-  Object.freeze({ id: 'victory', title: 'Vitória', description: 'Conquistou uma rodada.' }),
-  Object.freeze({ id: 'perfect', title: 'Sem erros', description: 'Venceu sem errar nenhuma letra.' }),
-  Object.freeze({ id: 'speed', title: 'Resposta rápida', description: 'Terminou a rodada em 30 segundos ou menos.' }),
-  Object.freeze({ id: 'survivor', title: 'Persistência', description: 'Ainda tentou até o fim da rodada.' }),
-])
-
-export function getElapsedMilliseconds({ elapsedBeforeSegment, segmentStartedAt, now }) {
-  if (
-    !Number.isFinite(elapsedBeforeSegment)
-    || elapsedBeforeSegment < 0
-    || !Number.isFinite(segmentStartedAt)
-    || segmentStartedAt < 0
-    || !Number.isFinite(now)
-    || now < segmentStartedAt
-  ) {
-    throw new TypeError('Os horários da partida precisam ser válidos.')
-  }
-
-  return Math.floor(elapsedBeforeSegment + now - segmentStartedAt)
-}
-
-export function getAchievementList(result) {
-  if (result === null || result === undefined) {
-    return []
-  }
-
-  if (
-    !['won', 'lost'].includes(result.status)
-    || !Number.isFinite(result.elapsedSeconds)
-    || result.elapsedSeconds < 0
-    || !Number.isInteger(result.errors)
-    || result.errors < 0
-    || result.errors > MAX_ERRORS
-  ) {
-    throw new TypeError('O resultado precisa ter status, tempo e erros válidos para calcular conquistas.')
-  }
-
-  const earnedIds = new Set()
-  if (result.status === 'won') {
-    earnedIds.add('victory')
-
-    if (result.errors === 0) {
-      earnedIds.add('perfect')
-    }
-
-    if (result.elapsedSeconds <= 30) {
-      earnedIds.add('speed')
-    }
-  } else {
-    earnedIds.add('survivor')
-  }
-
-  return ACHIEVEMENTS.filter(({ id }) => earnedIds.has(id))
-}
-
-export function mergeAchievementIds(existingIds, earnedIds) {
-  if (!Array.isArray(existingIds) || !Array.isArray(earnedIds)) {
-    throw new TypeError('As conquistas existentes e novas precisam ser listas.')
-  }
-
-  const knownIds = new Set(ACHIEVEMENTS.map(({ id }) => id))
-  const unlockedIds = new Set(
-    [...existingIds, ...earnedIds].filter((id) => knownIds.has(id)),
-  )
-
-  return ACHIEVEMENTS
-    .filter(({ id }) => unlockedIds.has(id))
-    .map(({ id }) => id)
-}
 
 export function normalizeWord(word) {
   if (typeof word !== 'string' || word.trim().length === 0) {
@@ -169,42 +93,12 @@ export function guessLetter(round, input) {
   }
 }
 
-export function expireRound(round) {
-  if (round.status !== 'in_progress') {
-    return round
-  }
-
-  return { ...round, status: 'lost' }
-}
-
-export function calculateScore({ difficulty, elapsedSeconds, errors, won }) {
+export function createSoloRound(difficulty, random = Math.random) {
   if (!Object.hasOwn(DIFFICULTY_RANGES, difficulty)) {
-    throw new TypeError('Selecione um nível de dificuldade válido.')
+    throw new RangeError(`Nível de dificuldade inválido: ${difficulty}`)
   }
 
-  if (
-    !Number.isFinite(elapsedSeconds)
-    || elapsedSeconds < 0
-    || !Number.isInteger(errors)
-    || errors < 0
-    || errors > MAX_ERRORS
-    || typeof won !== 'boolean'
-  ) {
-    throw new TypeError('O resultado da rodada precisa ter tempo, erros e vitória válidos.')
-  }
-
-  const difficultyBase = {
-    easy: 120,
-    medium: 155,
-    hard: 200,
-    expert: 245,
-  }
-
-  const timeBonus = Math.max(0, 120 - elapsedSeconds)
-  const resultBonus = won ? 150 : 0
-  const errorPenalty = errors * 15
-
-  return Math.max(0, difficultyBase[difficulty] + timeBonus + resultBonus - errorPenalty)
+  return createRound(chooseWord(difficulty, random), MAX_ERRORS)
 }
 
 export function compareResults(first, second) {

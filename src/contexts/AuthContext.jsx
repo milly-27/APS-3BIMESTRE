@@ -1,10 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { z } from 'zod'
-import {
-  getAuthRedirectUrl,
-  getSupabaseClient,
-  isSupabaseConfigured,
-} from '../lib/supabase.js'
+import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase.js'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const loginSchema = z.object({
@@ -96,43 +92,21 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  async function signUp({ displayName, email, password }) {
+  async function requestSignUpCode({ email }) {
     setAuthError('')
-    const { data, error } = await getSupabaseClient().auth.signUp({
+    const { error } = await getSupabaseClient().auth.signInWithOtp({
       email,
-      password,
       options: {
-        data: { display_name: displayName.trim() },
-        emailRedirectTo: getAuthRedirectUrl('/login'),
+        shouldCreateUser: true,
       },
     })
 
     if (error) {
-      throw new Error(`Não foi possível criar a conta: ${error.message}`, { cause: error })
+      throw new Error(`Não foi possível enviar o código: ${error.message}`, { cause: error })
     }
-
-    if (data.session) {
-      setSession(data.session)
-      return { ...data, requiresEmailVerification: false }
-    }
-
-    const { error: otpError } = await getSupabaseClient().auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: false,
-      },
-    })
-
-    if (otpError) {
-      throw new Error(`Não foi possível enviar o código de confirmação: ${otpError.message}`, {
-        cause: otpError,
-      })
-    }
-
-    return { ...data, requiresEmailVerification: true }
   }
 
-  async function verifyEmailCode({ email, token }) {
+  async function verifySignUpCode({ email, token }) {
     setAuthError('')
     const { data, error } = await getSupabaseClient().auth.verifyOtp({
       email,
@@ -151,20 +125,45 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  async function resendVerificationCode({ email }) {
+  async function completeSignUp({ displayName, password }) {
     setAuthError('')
-    const { error } = await getSupabaseClient().auth.signInWithOtp({
+    const client = getSupabaseClient()
+    const { error: profileError } = await client.auth.updateUser({
+      data: { display_name: displayName.trim() },
+    })
+
+    if (profileError) {
+      throw new Error(`Não foi possível salvar o nome: ${profileError.message}`, { cause: profileError })
+    }
+
+    const { error: passwordError } = await client.auth.updateUser({
+      password,
+    })
+
+    if (passwordError) {
+      throw new Error(`Não foi possível salvar a senha: ${passwordError.message}`, { cause: passwordError })
+    }
+  }
+
+  async function signUp({ displayName, email, password }) {
+    setAuthError('')
+    const { data, error } = await getSupabaseClient().auth.signUp({
       email,
+      password,
       options: {
-        shouldCreateUser: false,
+        data: { display_name: displayName.trim() },
       },
     })
 
     if (error) {
-      throw new Error(`Não foi possível reenviar o código: ${error.message}`, { cause: error })
+      throw new Error(`Não foi possível criar a conta: ${error.message}`, { cause: error })
     }
 
-    return true
+    if (data.session) {
+      setSession(data.session)
+    }
+
+    return data
   }
 
   async function signOut() {
@@ -184,11 +183,12 @@ export function AuthProvider({ children }) {
     pendingScore,
     session,
     setPendingScore,
-    resendVerificationCode,
+    completeSignUp,
+    requestSignUpCode,
     signIn,
     signOut,
     signUp,
-    verifyEmailCode,
+    verifySignUpCode,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -13,7 +13,7 @@ function getClient() {
   return getSupabaseClient()
 }
 
-export async function saveBestResult({ displayName, difficulty, elapsedSeconds, errors }) {
+function validateRankingPayload({ displayName, difficulty, elapsedSeconds, errors }) {
   if (
     typeof displayName !== 'string'
     || displayName.trim().length < 1
@@ -33,6 +33,10 @@ export async function saveBestResult({ displayName, difficulty, elapsedSeconds, 
   if (!Number.isInteger(errors) || errors < 0 || errors > 9) {
     throw new TypeError('A quantidade de erros do resultado é inválida.')
   }
+}
+
+export async function saveBestResult({ displayName, difficulty, elapsedSeconds, errors }) {
+  validateRankingPayload({ displayName, difficulty, elapsedSeconds, errors })
 
   const { data, error } = await getClient().rpc('save_ranking_result', {
     p_display_name: displayName.trim(),
@@ -47,6 +51,32 @@ export async function saveBestResult({ displayName, difficulty, elapsedSeconds, 
 
   if (typeof data !== 'boolean') {
     throw new Error('O Supabase não confirmou o registro do resultado.')
+  }
+
+  return data
+}
+
+export async function saveRoomResult({ roomId, displayName, difficulty, elapsedSeconds, errors }) {
+  if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(roomId)) {
+    throw new TypeError('Identificador da sala inválido.')
+  }
+
+  validateRankingPayload({ displayName, difficulty, elapsedSeconds, errors })
+
+  const { data, error } = await getClient().rpc('save_room_ranking_result', {
+    p_room_id: roomId,
+    p_display_name: displayName.trim(),
+    p_difficulty: difficulty,
+    p_elapsed_seconds: elapsedSeconds,
+    p_errors: errors,
+  })
+
+  if (error) {
+    throw new Error(`Não foi possível registrar o resultado da sala: ${error.message}`, { cause: error })
+  }
+
+  if (typeof data !== 'boolean') {
+    throw new Error('O Supabase não confirmou o registro do resultado da sala.')
   }
 
   return data
@@ -74,4 +104,25 @@ export async function getLeaderboard() {
   }))
 
   return Object.fromEntries(entries)
+}
+
+export async function getRoomLeaderboard(roomId) {
+  if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(roomId)) {
+    throw new TypeError('Identificador da sala inválido.')
+  }
+
+  const { data, error } = await getClient()
+    .from('room_leaderboard')
+    .select('room_id, display_name, difficulty, elapsed_seconds, errors, updated_at')
+    .eq('room_id', roomId)
+    .order('elapsed_seconds', { ascending: true })
+    .order('errors', { ascending: true })
+    .order('updated_at', { ascending: true })
+    .limit(10)
+
+  if (error) {
+    throw new Error(`Não foi possível carregar o ranking da sala: ${error.message}`, { cause: error })
+  }
+
+  return data ?? []
 }
