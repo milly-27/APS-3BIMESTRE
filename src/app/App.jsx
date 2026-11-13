@@ -14,7 +14,7 @@ import {
   signUpSchema,
   AuthProvider,
   useAuth,
-} from './contexts/AuthContext.jsx'
+} from '../features/auth/AuthContext.jsx'
 import {
   createRoom,
   getRoundState,
@@ -23,30 +23,45 @@ import {
   subscribeToRoom,
   startRoom,
   submitGuess,
-} from './services/roomService.js'
+} from '../features/rooms/roomService.js'
 import {
   getLeaderboard,
   saveBestResult,
   saveRoomResult,
-} from './services/rankingService.js'
+} from '../features/ranking/rankingService.js'
 import {
   createSoloRound,
   guessLetter,
   MAX_ERRORS,
-} from './features/game/gameRules.js'
-import { isValidOtpCode, normalizeOtpCode } from './features/auth/otp.js'
-import { gameModeOptions } from './gameModes.js'
+} from '../features/game/gameRules.js'
+import { isValidOtpCode, normalizeOtpCode } from '../features/auth/otp.js'
+import { gameModeOptions } from '../features/game/gameModes.js'
+import {
+  playGameStartSound,
+  playGuessSound,
+  playRoundEndSound,
+  playSoundEffect,
+  startBackgroundMusic,
+  stopBackgroundMusic,
+} from '../features/settings/audio.js'
 import './App.css'
+
+const settingsStorageKey = 'forca-settings'
+const defaultSettings = {
+  soundEffects: true,
+  backgroundMusic: true,
+  theme: 'purple',
+}
+const themeOptions = [
+  { value: 'light', label: 'Claro', color: '#f5f6ff' },
+  { value: 'purple', label: 'Roxo', color: '#8b45f5' },
+]
 
 const difficulties = [
   { value: 'easy', label: 'Fácil', detail: '3 a 5 letras' },
   { value: 'medium', label: 'Médio', detail: '6 a 8 letras' },
   { value: 'hard', label: 'Difícil', detail: '9 a 12 letras' },
   { value: 'expert', label: 'Expert', detail: '14 letras ou mais' },
-]
-
-const pages = [
-  { path: '/configuracoes', label: 'Configurações', title: 'Configurações', description: 'As preferências da partida serão implementadas junto às telas do jogo.' },
 ]
 
 function formatElapsedTime(seconds) {
@@ -223,13 +238,145 @@ function ResultPage() {
   )
 }
 
-function PagePlaceholder({ title, description }) {
+function loadSettings() {
+  const savedSettings = window.localStorage.getItem(settingsStorageKey)
+  if (!savedSettings) {
+    return defaultSettings
+  }
+
+  let parsedSettings
+  try {
+    parsedSettings = JSON.parse(savedSettings)
+  } catch (error) {
+    console.error('As configurações salvas não puderam ser lidas.', error)
+    return defaultSettings
+  }
+
+  if (parsedSettings?.theme === 'dark') {
+    parsedSettings = { ...parsedSettings, theme: 'purple' }
+  }
+
+  const isValidSettings = parsedSettings
+    && typeof parsedSettings.soundEffects === 'boolean'
+    && typeof parsedSettings.backgroundMusic === 'boolean'
+    && themeOptions.some(({ value }) => value === parsedSettings.theme)
+
+  if (!isValidSettings) {
+    console.error('As configurações salvas têm um formato inválido.')
+    return defaultSettings
+  }
+
+  return parsedSettings
+}
+
+function SettingsPage({ settings, onSettingChange, isModal = false }) {
+  const navigate = useNavigate()
+
+  function closeSettings() {
+    navigate(isModal ? -1 : '/')
+  }
+
+  useEffect(() => {
+    if (!isModal) {
+      return undefined
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === 'Escape') {
+        navigate(-1)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isModal, navigate])
+
   return (
-    <section className="page-card" aria-labelledby="page-title">
-      <p className="eyebrow">Jogo da Forca</p>
-      <h1 id="page-title">{title}</h1>
-      <p className="page-description">{description}</p>
-    </section>
+    <div
+      className={isModal ? 'settings-overlay' : 'settings-page'}
+      onClick={isModal ? (event) => {
+        if (event.target === event.currentTarget) {
+          closeSettings()
+        }
+      } : undefined}
+    >
+      <section
+        aria-labelledby="settings-title"
+        aria-modal={isModal || undefined}
+        className="settings-panel"
+        role={isModal ? 'dialog' : undefined}
+      >
+        <header className="settings-header">
+          <div className="settings-heading">
+            <span className="settings-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+                <path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z" />
+              </svg>
+            </span>
+            <h1 id="settings-title">Configurações</h1>
+          </div>
+          <button
+            aria-label="Fechar configurações"
+            className="settings-close"
+            onClick={closeSettings}
+            type="button"
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="settings-section">
+          <h2>Som e música</h2>
+          <label className="settings-toggle">
+            <span>
+              <span className="settings-control-icon" aria-hidden="true">◖))</span>
+              <span>Efeitos sonoros</span>
+            </span>
+            <input
+              aria-label="Efeitos sonoros"
+              checked={settings.soundEffects}
+              onChange={(event) => onSettingChange('soundEffects', event.target.checked)}
+              role="switch"
+              type="checkbox"
+            />
+            <span className="settings-switch" aria-hidden="true" />
+          </label>
+          <label className="settings-toggle">
+            <span>
+              <span className="settings-control-icon settings-music-icon" aria-hidden="true">♫</span>
+              <span>Música de fundo</span>
+            </span>
+            <input
+              aria-label="Música de fundo"
+              checked={settings.backgroundMusic}
+              onChange={(event) => onSettingChange('backgroundMusic', event.target.checked)}
+              role="switch"
+              type="checkbox"
+            />
+            <span className="settings-switch" aria-hidden="true" />
+          </label>
+        </div>
+
+        <fieldset className="settings-section settings-themes">
+          <legend>Tema visual</legend>
+          {themeOptions.map(({ value, label, color }) => (
+            <label className="settings-theme-option" key={value}>
+              <input
+                checked={settings.theme === value}
+                name="visual-theme"
+                onChange={() => onSettingChange('theme', value)}
+                type="radio"
+                value={value}
+              />
+              <span className="settings-theme-swatch" style={{ '--swatch-color': color }} />
+              <span>{label}</span>
+              {settings.theme === value && <span className="settings-theme-check" aria-hidden="true">✓</span>}
+            </label>
+          ))}
+        </fieldset>
+      </section>
+    </div>
   )
 }
 
@@ -909,26 +1056,33 @@ function RoomWaitingPage() {
 
 function HangmanFigure({ errors }) {
   const parts = [
-    <path d="M75 26h50M88 26l-7 12M112 26l7 12" key="hat" />,
-    <circle cx="100" cy="61" key="head" r="20" />,
-    <path d="M100 81v49" key="body" />,
-    <path d="m100 91-25 25" key="left-arm" />,
-    <path d="m100 91 25 25" key="right-arm" />,
-    <path d="m100 130-23 27" key="left-leg" />,
-    <path d="m100 130 23 27" key="right-leg" />,
-    <circle cx="93" cy="59" key="left-eye" r="1.5" />,
-    <circle cx="107" cy="59" key="right-eye" r="1.5" />,
-    <path d="M94 69q6-5 12 0" key="mouth" />,
+    <circle cx="174" cy="91" r="19" key="head" />,
+    <path d="M174 110v49" key="body" />,
+    <path d="m174 121-25 25" key="left-arm" />,
+    <path d="m174 121 25 25" key="right-arm" />,
+    <path d="m174 159-23 29" key="left-leg" />,
+    <path d="m174 159 23 29" key="right-leg" />,
   ]
 
   return (
-    <svg
-      className="hangman-figure"
-      viewBox="0 0 200 180"
-      role="img"
-      aria-label={`Forca com ${errors} de 10 erros`}
-    >
-      <path className="gallows" d="M35 165h130M55 165V20h90v10" />
+    <svg className="hangman-figure" viewBox="0 0 260 230" role="img"
+      aria-label={`Forca de madeira com ${errors} erros`}>
+      <defs>
+        <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#a85c0b" />
+          <stop offset=".45" stopColor="#d18a20" />
+          <stop offset="1" stopColor="#a85c0b" />
+        </linearGradient>
+      </defs>
+      <path d="M24 218H235" stroke="#55505a" strokeWidth="9" strokeLinecap="round" />
+      <path d="M66 215V18h25v197zM66 18h170v25H66zM89 100l74-82h28l-102 111z"
+        fill="url(#wood)" stroke="#8b4b08" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M66 18h25M91 43h145" stroke="#e2a13b" strokeWidth="3" opacity=".55" />
+      <path d="M174 43v32" stroke="#f8bd39" strokeWidth="7" strokeLinecap="round" />
+      <path d="M174 74c-23 12-24 39 0 52 24-13 23-40 0-52z"
+        fill="none" stroke="#f8bd39" strokeWidth="7" strokeLinecap="round" />
+      <path d="M164 68q10 8 20 0M164 75q10 8 20 0"
+        fill="none" stroke="#f8bd39" strokeWidth="6" strokeLinecap="round" />
       {parts.slice(0, errors).map((part) => (
         <g className="hangman-part" key={part.key}>{part}</g>
       ))}
@@ -936,7 +1090,7 @@ function HangmanFigure({ errors }) {
   )
 }
 
-function RoundPage() {
+function RoundPage({ soundEffectsEnabled }) {
   const { roomId } = useParams()
   const navigate = useNavigate()
   const { setPendingScore } = useAuth()
@@ -1025,6 +1179,12 @@ function RoundPage() {
       const nextRound = await submitGuess(roomId, letter)
       setRound(nextRound)
       setSeconds(nextRound.elapsed_seconds)
+      if (soundEffectsEnabled) {
+        playGuessSound(nextRound.correct_letters.includes(letter))
+        if (nextRound.status !== round.status) {
+          playRoundEndSound(nextRound.status)
+        }
+      }
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível registrar seu palpite.')
     } finally {
@@ -1128,7 +1288,7 @@ function RoundPage() {
   )
 }
 
-function SoloGamePage({ mode = 'solo' }) {
+function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
   const isIndividual = mode === 'individual'
   const modeLabel = isIndividual ? 'individual' : 'solo'
   const heading = isIndividual ? 'Jogar individual' : 'Jogar sozinho'
@@ -1145,6 +1305,9 @@ function SoloGamePage({ mode = 'solo' }) {
     setSeconds(0)
     setError('')
     setIsSubmitting(false)
+    if (soundEffectsEnabled) {
+      playGameStartSound()
+    }
   }
 
   useEffect(() => {
@@ -1168,7 +1331,14 @@ function SoloGamePage({ mode = 'solo' }) {
     setError('')
 
     try {
-      setRound((currentRound) => guessLetter(currentRound, letter))
+      const nextRound = guessLetter(round, letter)
+      setRound(nextRound)
+      if (soundEffectsEnabled) {
+        playGuessSound(nextRound.correctGuesses.includes(letter))
+        if (nextRound.status !== round.status) {
+          playRoundEndSound(nextRound.status)
+        }
+      }
     } catch (requestError) {
       setError(requestError.message || 'Não foi possível registrar seu palpite.')
     } finally {
@@ -1188,25 +1358,27 @@ function SoloGamePage({ mode = 'solo' }) {
       <p className="eyebrow">{eyebrow}</p>
       <h1 id={`${modeLabel}-title`}>{heading}</h1>
 
-      <div className="room-form" style={{ gap: '1.25rem' }}>
-        <div className="difficulty-picker">
-          <label className="form-field" htmlFor={`${modeLabel}-difficulty`}>
-            <span>Escolha o nível antes de iniciar a partida</span>
-            <select
-              id={`${modeLabel}-difficulty`}
-              onChange={(event) => {
-                const nextDifficulty = event.target.value
-                setDifficulty(nextDifficulty)
-              }}
-              value={difficulty}
-            >
-              {difficulties.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+      {!round && (
+        <div className="room-form" style={{ gap: '1.25rem' }}>
+          <div className="difficulty-picker">
+            <label className="form-field" htmlFor={`${modeLabel}-difficulty`}>
+              <span>Escolha o nível antes de iniciar a partida</span>
+              <select
+                id={`${modeLabel}-difficulty`}
+                onChange={(event) => {
+                  const nextDifficulty = event.target.value
+                  setDifficulty(nextDifficulty)
+                }}
+                value={difficulty}
+              >
+                {difficulties.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
-      </div>
+      )}
 
       {error && <p className="form-error" role="alert">{error}</p>}
 
@@ -1224,14 +1396,16 @@ function SoloGamePage({ mode = 'solo' }) {
 
       {round && (
         <>
-          <div className="round-stats">
-            <div><span>Tempo</span><strong>{elapsedLabel}</strong></div>
-            <div><span>Erros</span><strong>{round.incorrectGuesses.length}/{MAX_ERRORS}</strong></div>
-            <div><span>Nível</span><strong>{difficulties.find(({ value }) => value === difficulty)?.label}</strong></div>
-          </div>
-
           <svg className="hangman-figure" viewBox="0 0 200 180" role="img" aria-label={`Forca com ${round.incorrectGuesses.length} de ${MAX_ERRORS} erros`}>
-            <path className="gallows" d="M35 165h130M55 165V20h90v10" />
+            <g className="wooden-gallows">
+        <rect x="34" y="158" width="132" height="10" rx="4" className="wood-base" />
+        <rect x="48" y="18" width="18" height="142" rx="2" className="wood-post" />
+        <rect x="48" y="18" width="112" height="18" rx="2" className="wood-beam" />
+        <path d="M64 76 L104 36 L88 36 L64 60 Z" className="wood-brace" />
+        <path d="M48 18h18v142H48z" className="wood-highlight" />
+        <circle cx="57" cy="27" r="2" className="wood-nail" />
+        <circle cx="151" cy="27" r="2" className="wood-nail" />
+      </g>
             {[
               <path d="M75 26h50M88 26l-7 12M112 26l7 12" key="hat" />,
               <circle cx="100" cy="61" key="head" r="20" />,
@@ -1248,47 +1422,55 @@ function SoloGamePage({ mode = 'solo' }) {
             ))}
           </svg>
 
-          <div className="word-display" aria-label="Palavra oculta">
-            {Array.from(round.word ?? '').map((letter, index) => (
-              <span className="word-letter" key={`${index}-${letter}`}>
-                {round.correctGuesses.includes(letter) ? letter : ''}
-              </span>
-            ))}
-          </div>
-
-          {isFinished && (
-            <div className={`round-result ${round.status}`} role="status">
-              <strong>{round.status === 'won' ? 'Parabéns!' : 'Fim da rodada'}</strong>
-              <span>A palavra era <b>{round.word}</b>.</span>
-              <span>Seu tempo: {elapsedLabel} · Erros: {round.incorrectGuesses.length}</span>
+          <div className="round-game-panel">
+            <div className="round-stats">
+              <div><span>Tempo</span><strong>{elapsedLabel}</strong></div>
+              <div><span>Erros</span><strong>{round.incorrectGuesses.length}/{MAX_ERRORS}</strong></div>
+              <div><span>Nível</span><strong>{difficulties.find(({ value }) => value === difficulty)?.label}</strong></div>
             </div>
-          )}
 
-          <div className="letter-keyboard" aria-label="Teclado de letras">
-            {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
-              const isGuessed = guessedLetters.has(letter)
-              const isCorrect = round.correctGuesses?.includes(letter)
+            <div className="word-display" aria-label="Palavra oculta">
+              {Array.from(round.word ?? '').map((letter, index) => (
+                <span className="word-letter" key={`${index}-${letter}`}>
+                  {round.correctGuesses.includes(letter) ? letter : ''}
+                </span>
+              ))}
+            </div>
 
-              return (
-                <button
-                  aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
-                  className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
-                  disabled={isGuessed || round.status !== 'in_progress' || isSubmitting}
-                  key={letter}
-                  onClick={() => void handleGuess(letter)}
-                  type="button"
-                >
-                  {letter}
-                </button>
-              )
-            })}
-          </div>
+            {isFinished && (
+              <div className={`round-result ${round.status}`} role="status">
+                <strong>{round.status === 'won' ? 'Parabéns!' : 'Fim da rodada'}</strong>
+                <span>A palavra era <b>{round.word}</b>.</span>
+                <span>Seu tempo: {elapsedLabel} · Erros: {round.incorrectGuesses.length}</span>
+              </div>
+            )}
 
-          <div className="home-actions">
-            <button className="button button-primary" onClick={() => startNewGame()} type="button">
-              Nova partida
-            </button>
-            <NavLink className="button button-secondary" to="/">Voltar ao início</NavLink>
+            <div className="letter-keyboard" aria-label="Teclado de letras">
+              {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
+                const isGuessed = guessedLetters.has(letter)
+                const isCorrect = round.correctGuesses?.includes(letter)
+
+                return (
+                  <button
+                    aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
+                    className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
+                    disabled={isGuessed || round.status !== 'in_progress' || isSubmitting}
+                    key={letter}
+                    onClick={() => void handleGuess(letter)}
+                    type="button"
+                  >
+                    {letter}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="home-actions">
+              <button className="button button-primary" onClick={() => startNewGame()} type="button">
+                Nova partida
+              </button>
+              <NavLink className="button button-secondary" to="/">Voltar ao início</NavLink>
+            </div>
           </div>
         </>
       )}
@@ -1296,8 +1478,8 @@ function SoloGamePage({ mode = 'solo' }) {
   )
 }
 
-function IndividualGamePage() {
-  return <SoloGamePage mode="individual" />
+function IndividualGamePage({ soundEffectsEnabled }) {
+  return <SoloGamePage mode="individual" soundEffectsEnabled={soundEffectsEnabled} />
 }
 
 function HomePage() {
@@ -1330,9 +1512,47 @@ function NotFoundPage() {
 
 function AppLayout() {
   const { session } = useAuth()
+  const location = useLocation()
+  const backgroundLocation = location.state?.backgroundLocation
+  const [settings, setSettings] = useState(loadSettings)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.theme
+    window.localStorage.setItem(settingsStorageKey, JSON.stringify(settings))
+  }, [settings])
+
+  function updateSetting(name, value) {
+    setSettings((currentSettings) => ({ ...currentSettings, [name]: value }))
+
+    if (name === 'backgroundMusic') {
+      if (value) {
+        startBackgroundMusic()
+      } else {
+        stopBackgroundMusic()
+      }
+    }
+  }
+
+  function handleAppClick(event) {
+    if (!(event.target instanceof Element)) {
+      return
+    }
+
+    const clickedControl = event.target.closest('a, input, label, button:not(.letter-key):not(.button)')
+    if (settings.soundEffects && clickedControl) {
+      playSoundEffect()
+    }
+    if (settings.backgroundMusic) {
+      startBackgroundMusic()
+    }
+  }
+
+  const settingsPage = (
+    <SettingsPage settings={settings} onSettingChange={updateSetting} />
+  )
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" onClickCapture={handleAppClick}>
       <header className="site-header">
         <NavLink className="brand" to="/" aria-label="Jogo da Forca — início">
           FORCA<span>.</span>
@@ -1343,34 +1563,42 @@ function AppLayout() {
           <NavLink to={session ? '/conta' : '/login'}>
             {session ? 'Minha conta' : 'Entrar'}
           </NavLink>
-          <NavLink to="/configuracoes" aria-label="Configurações">Configurações</NavLink>
+          <NavLink
+            aria-label="Configurações"
+            state={{ backgroundLocation: location }}
+            to="/configuracoes"
+          >
+            Configurações
+          </NavLink>
         </nav>
       </header>
 
       <main className="page-content">
-        <Routes>
+        <Routes location={backgroundLocation || location}>
           <Route path="/" element={<HomePage />} />
-          <Route path="/solo" element={<SoloGamePage />} />
-          <Route path="/individual" element={<IndividualGamePage />} />
+          <Route path="/solo" element={<SoloGamePage soundEffectsEnabled={settings.soundEffects} />} />
+          <Route path="/individual" element={<IndividualGamePage soundEffectsEnabled={settings.soundEffects} />} />
           <Route path="/salas" element={<RoomsPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/cadastro" element={<SignUpPage />} />
           <Route path="/resultado" element={<ResultPage />} />
           <Route path="/ranking" element={<RankingPage />} />
           <Route path="/conta" element={<ProtectedAccountRoute />} />
+          <Route path="/configuracoes" element={settingsPage} />
           <Route path="/salas/criar" element={<RoomSetupPage action="criar" />} />
           <Route path="/salas/entrar" element={<RoomSetupPage action="entrar" />} />
-          <Route path="/salas/:roomId/jogo" element={<RoundPage />} />
+          <Route path="/salas/:roomId/jogo" element={<RoundPage soundEffectsEnabled={settings.soundEffects} />} />
           <Route path="/salas/:roomId" element={<RoomWaitingPage />} />
-          {pages.map(({ path, title, description }) => (
-            <Route
-              key={path}
-              path={path}
-              element={<PagePlaceholder title={title} description={description} />}
-            />
-          ))}
           <Route path="*" element={<NotFoundPage />} />
         </Routes>
+        {backgroundLocation && (
+          <Routes location={location}>
+            <Route
+              path="/configuracoes"
+              element={<SettingsPage settings={settings} onSettingChange={updateSetting} isModal />}
+            />
+          </Routes>
+        )}
       </main>
     </div>
   )

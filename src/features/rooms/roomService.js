@@ -1,4 +1,4 @@
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase.js'
+import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase.js'
 
 const DIFFICULTIES = new Set(['easy', 'medium', 'hard', 'expert'])
 const INVITE_CODE_PATTERN = /^[A-F0-9]{6}$/

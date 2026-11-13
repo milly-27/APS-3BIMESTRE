@@ -1,4 +1,4 @@
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase.js'
+import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase.js'
 
 const DIFFICULTIES = ['easy', 'medium', 'hard', 'expert']
 const VALID_DIFFICULTIES = new Set(DIFFICULTIES)

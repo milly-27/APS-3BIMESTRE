@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { z } from 'zod'
-import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase.js'
+import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase.js'
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const loginSchema = z.object({
