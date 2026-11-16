@@ -34,7 +34,6 @@ import {
   guessLetter,
   MAX_ERRORS,
 } from '../features/game/gameRules.js'
-import { isValidOtpCode, normalizeOtpCode } from '../features/auth/otp.js'
 import { gameModeOptions } from '../features/game/gameModes.js'
 import {
   playGameStartSound,
@@ -499,7 +498,7 @@ function LoginPage() {
 }
 
 function SignUpPage() {
-  const { completeSignUp, pendingScore, requestSignUpCode, verifySignUpCode } = useAuth()
+  const { pendingScore, signUp } = useAuth()
   const navigate = useNavigate()
   const [values, setValues] = useState({
     displayName: '',
@@ -511,9 +510,6 @@ function SignUpPage() {
   const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [otpCode, setOtpCode] = useState('')
-  const [otpSent, setOtpSent] = useState(false)
-  const [otpVerifying, setOtpVerifying] = useState(false)
 
   function updateField(event) {
     const { name, value } = event.target
@@ -521,14 +517,11 @@ function SignUpPage() {
     setFieldErrors((current) => ({ ...current, [name]: '' }))
     setFormError('')
     setNotice('')
-
-    if (name === 'displayName' || name === 'email') {
-      setOtpSent(false)
-      setOtpCode('')
-    }
   }
 
-  async function handleSendCode() {
+  async function handleSubmit(event) {
+    event.preventDefault()
+
     const validation = signUpSchema.safeParse(values)
     if (!validation.success) {
       setFieldErrors(Object.fromEntries(
@@ -543,55 +536,19 @@ function SignUpPage() {
     setNotice('')
 
     try {
-      await requestSignUpCode({ email: validation.data.email })
-      setOtpSent(true)
-      setNotice('Código enviado para o seu e-mail. Digite-o abaixo para concluir o cadastro.')
+      const { displayName, email, password } = validation.data
+      const data = await signUp({ displayName, email, password })
+
+      if (data.session) {
+        navigate(pendingScore ? '/resultado' : '/conta', { replace: true })
+      } else {
+        setNotice('Conta criada! Confirme seu e-mail pelo link que enviamos e depois faça login.')
+      }
     } catch (error) {
-      setFormError(error.message || 'Não foi possível enviar o código.')
+      setFormError(error.message || 'Não foi possível criar a conta.')
     } finally {
       setIsSubmitting(false)
     }
-  }
-
-  async function handleVerifyCode(event) {
-    event.preventDefault()
-    setFormError('')
-    setNotice('')
-
-    if (!isValidOtpCode(otpCode)) {
-      setFormError('Informe o código de 6 dígitos enviado para o seu e-mail.')
-      return
-    }
-
-    setOtpVerifying(true)
-
-    try {
-      const { email, displayName, password } = values
-      const verification = await verifySignUpCode({ email, token: otpCode.trim() })
-
-      if (!verification.session) {
-        throw new Error('O código foi validado, mas a sessão não foi criada.')
-      }
-
-      await completeSignUp({ displayName, password })
-      setNotice('Cadastro concluído com sucesso!')
-      navigate(pendingScore ? '/resultado' : '/conta', { replace: true })
-    } catch (error) {
-      setFormError(error.message || 'Não foi possível confirmar o código.')
-    } finally {
-      setOtpVerifying(false)
-    }
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault()
-
-    if (otpSent) {
-      await handleVerifyCode(event)
-      return
-    }
-
-    await handleSendCode()
   }
 
   return (
@@ -625,72 +582,31 @@ function SignUpPage() {
           type="email"
           value={values.email}
         />
-        {!otpSent && (
-          <>
-            <AuthField
-              autoComplete="new-password"
-              error={fieldErrors.password}
-              id="signup-password"
-              label="Senha (mínimo 8 caracteres)"
-              name="password"
-              onChange={updateField}
-              type="password"
-              value={values.password}
-            />
-            <AuthField
-              autoComplete="new-password"
-              error={fieldErrors.confirmPassword}
-              id="signup-confirm-password"
-              label="Confirmar senha"
-              name="confirmPassword"
-              onChange={updateField}
-              type="password"
-              value={values.confirmPassword}
-            />
-          </>
-        )}
-        {otpSent && (
-          <div className="otp-panel" aria-live="polite">
-            <span className="otp-badge">Verificação de e-mail</span>
-            <p>
-              Enviamos um código para <strong>{values.email}</strong>.
-              Digite os 6 números abaixo para concluir o cadastro.
-            </p>
-            <AuthField
-              autoComplete="one-time-code"
-              error={fieldErrors.otpCode}
-              id="signup-otp"
-              inputMode="numeric"
-              label="Código do e-mail"
-              maxLength={6}
-              name="otpCode"
-              onChange={(event) => setOtpCode(normalizeOtpCode(event.target.value))}
-              type="text"
-              value={otpCode}
-            />
-          </div>
-        )}
+        <AuthField
+          autoComplete="new-password"
+          error={fieldErrors.password}
+          id="signup-password"
+          label="Senha (mínimo 8 caracteres)"
+          name="password"
+          onChange={updateField}
+          type="password"
+          value={values.password}
+        />
+        <AuthField
+          autoComplete="new-password"
+          error={fieldErrors.confirmPassword}
+          id="signup-confirm-password"
+          label="Confirmar senha"
+          name="confirmPassword"
+          onChange={updateField}
+          type="password"
+          value={values.confirmPassword}
+        />
         {formError && <p className="form-error" role="alert">{formError}</p>}
         {notice && <p className="feature-notice" role="status">{notice}</p>}
-        <button className="button button-primary" disabled={isSubmitting || otpVerifying} type="submit">
-          {isSubmitting
-            ? 'Enviando código...'
-            : otpVerifying
-              ? 'Confirmando...'
-              : otpSent
-                ? 'Confirmar código'
-                : 'Enviar código'}
+        <button className="button button-primary" disabled={isSubmitting} type="submit">
+          {isSubmitting ? 'Criando conta...' : 'Criar conta'}
         </button>
-        {otpSent && (
-          <button
-            className="button button-secondary"
-            disabled={isSubmitting || otpVerifying}
-            onClick={handleSendCode}
-            type="button"
-          >
-            Reenviar código
-          </button>
-        )}
       </form>
       <p className="auth-switch">
         Já tem conta? <Link to="/login">Entrar</Link>
