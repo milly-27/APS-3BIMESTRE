@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   BrowserRouter,
   Link,
@@ -33,6 +33,7 @@ import {
   createSoloRound,
   guessLetter,
   MAX_ERRORS,
+  normalizeWord,
 } from '../features/game/gameRules.js'
 import { gameModeOptions } from '../features/game/gameModes.js'
 import {
@@ -43,6 +44,7 @@ import {
   startBackgroundMusic,
   stopBackgroundMusic,
 } from '../features/settings/audio.js'
+import SceneDecor from './SceneDecor.jsx'
 import './App.css'
 
 const settingsStorageKey = 'forca-settings'
@@ -52,8 +54,10 @@ const defaultSettings = {
   theme: 'purple',
 }
 const themeOptions = [
-  { value: 'light', label: 'Claro', color: '#f5f6ff' },
-  { value: 'purple', label: 'Roxo', color: '#8b45f5' },
+  { value: 'purple', label: 'Cristais', color: 'radial-gradient(circle at 30% 70%, #b685ff, transparent 55%), radial-gradient(circle at 75% 30%, #f29bc6, transparent 50%), #12301f' },
+  { value: 'light', label: 'Clareira', color: 'radial-gradient(circle at 50% 0%, #ffe082, transparent 60%), linear-gradient(180deg, #4d9a55, #1f5a2e)' },
+  { value: 'ember', label: 'Lanternas', color: 'radial-gradient(circle at 50% 75%, #ff9a3c, transparent 60%), #3a2412' },
+  { value: 'moon', label: 'Luar', color: 'radial-gradient(circle at 70% 25%, #dbe6ff, transparent 22%), linear-gradient(180deg, #1c2e55, #0a1226)' },
 ]
 
 const difficulties = [
@@ -62,6 +66,67 @@ const difficulties = [
   { value: 'hard', label: 'Difícil', detail: '9 a 12 letras' },
   { value: 'expert', label: 'Expert', detail: '14 letras ou mais' },
 ]
+
+function DifficultyIcon({ value }) {
+  return (
+    <svg className="diff-icon" viewBox="0 0 48 48" aria-hidden="true">
+      {value === 'easy' && (
+        <g>
+          <path d="M8 38C8 16 22 8 40 8c0 22-10 32-30 32Z" fill="#6fae45" stroke="#1d3a17" strokeWidth="2" />
+          <path d="M10 38C18 28 26 20 36 12" fill="none" stroke="#1d3a17" strokeWidth="2" />
+        </g>
+      )}
+      {value === 'medium' && (
+        <g>
+          <rect x="19" y="24" width="10" height="16" rx="4" fill="#f0e2c0" />
+          <path d="M5 28C5 8 43 8 43 28c0 3-8 4-19 4S5 31 5 28Z" fill="#c8405f" stroke="#4a1220" strokeWidth="2" />
+          <circle cx="16" cy="19" r="3" fill="#fff6dd" /><circle cx="30" cy="15" r="2.5" fill="#fff6dd" /><circle cx="36" cy="23" r="2" fill="#fff6dd" />
+        </g>
+      )}
+      {value === 'hard' && (
+        <g>
+          <path d="M24 4 36 18 28 44H20L12 18Z" fill="#a46cf0" stroke="#3b1f6e" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M24 4 36 18 28 44 24 20Z" fill="#ffffff44" />
+        </g>
+      )}
+      {value === 'expert' && (
+        <g>
+          <path d="M24 3c3 9 14 13 14 26a14 14 0 0 1-28 0c0-6 3-9 6-12 0 5 3 7 5 7 1-9-1-14 3-21Z" fill="#ff8a3c" stroke="#5a1f0a" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M24 24c2 5 6 7 6 12a6 6 0 0 1-12 0c0-3 2-5 3-7 1 2 2 3 3 2Z" fill="#ffd37a" />
+        </g>
+      )}
+    </svg>
+  )
+}
+
+function CaveMouth() {
+  return (
+    <div className="cave-mouth" aria-hidden="true">
+      <svg viewBox="0 0 400 230">
+        <defs>
+          <radialGradient id="cave-glow" cx="50%" cy="90%" r="75%">
+            <stop offset="0" stopColor="#ffd37a" />
+            <stop offset=".4" stopColor="#ff9a3c" />
+            <stop offset="1" stopColor="#2a1208" />
+          </radialGradient>
+        </defs>
+        <path d="M10 230V120C10 40 90 6 200 6s190 34 190 114v110Z" fill="#5d4a3c" stroke="#1e110a" strokeWidth="5" />
+        <path d="M30 120 52 96M350 100l20 22M120 30l14 18M270 26l-12 20M70 60l16 6M330 58l-18 6" stroke="#3b2d23" strokeWidth="4" strokeLinecap="round" />
+        <path d="M44 230V126C44 66 108 36 200 36s156 30 156 90v104Z" fill="url(#cave-glow)" stroke="#1e110a" strokeWidth="4" />
+        <g className="cave-fire">
+          <path d="M200 230c-38-6-46-40-24-66 4 14 14 18 20 8 2-24 22-40 22-40 2 24 30 36 20 70-6 16-20 24-38 28Z" fill="#ffe7a0" opacity=".9" />
+        </g>
+        <path d="M14 124C14 44 92 10 200 10s186 34 186 114" fill="none" stroke="#3f7a35" strokeWidth="9" strokeDasharray="22 6" strokeLinecap="round" />
+        {[[40, 84, '#f29bc6'], [78, 48, '#c9a2ff'], [150, 20, '#f29bc6'], [250, 18, '#c9a2ff'], [322, 50, '#f29bc6'], [362, 88, '#ffd978']].map(([x, y, c]) => (
+          <g key={x} transform={`translate(${x} ${y})`}>
+            {[0, 72, 144, 216, 288].map((a) => <ellipse cx="0" cy="-6" fill={c} key={a} rx="4" ry="6.5" transform={`rotate(${a})`} />)}
+            <circle r="3" fill="#fff3b0" />
+          </g>
+        ))}
+      </svg>
+    </div>
+  )
+}
 
 function formatElapsedTime(seconds) {
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
@@ -140,72 +205,112 @@ function RankingPage() {
   )
 }
 
-function ResultPage() {
+function getRegisteredDisplayName(session) {
+  const user = session?.user
+  const fromMetadata = user?.user_metadata?.display_name
+  const fromEmail = user?.email?.split('@')[0]
+  return String(fromMetadata || fromEmail || 'Jogador').trim().slice(0, 32) || 'Jogador'
+}
+
+// Envia ao Supabase a vitória pendente (solo ou sala) assim que a pessoa estiver logada.
+function useScoreRegistration() {
   const { pendingScore, session, setPendingScore } = useAuth()
   const [isSaving, setIsSaving] = useState(false)
-  const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [attempt, setAttempt] = useState(0)
+  const savingRef = useRef(null)
   const isRegisteredUser = Boolean(session?.user && !session.user.is_anonymous)
-  const displayName = session?.user?.user_metadata?.display_name || 'Jogador'
+  const displayName = getRegisteredDisplayName(session)
 
   useEffect(() => {
-    if (!pendingScore || pendingScore.status !== 'won' || !isRegisteredUser || !displayName) {
-      return undefined
+    if (!pendingScore || pendingScore.status !== 'won' || pendingScore.saved || !isRegisteredUser) {
+      return
     }
 
-    let active = true
-    Promise.resolve()
-      .then(() => {
-        if (!active) {
-          return undefined
-        }
+    if (savingRef.current === pendingScore) {
+      return
+    }
 
-        setIsSaving(true)
-        setNotice('')
-        setError('')
+    const score = pendingScore
+    savingRef.current = score
+    setIsSaving(true)
+    setError('')
 
-        const payload = {
-          displayName,
-          difficulty: pendingScore.difficulty,
-          elapsedSeconds: pendingScore.elapsedSeconds,
-          errors: pendingScore.errors,
-        }
+    const payload = {
+      displayName,
+      difficulty: score.difficulty,
+      elapsedSeconds: score.elapsedSeconds,
+      errors: score.errors,
+    }
+    const request = score.roomId
+      ? saveRoomResult({ roomId: score.roomId, ...payload })
+      : saveBestResult(payload)
 
-        return pendingScore.roomId
-          ? saveRoomResult({
-              roomId: pendingScore.roomId,
-              ...payload,
-            })
-          : saveBestResult(payload)
-      })
+    request
       .then((isNewRecord) => {
-        if (!active || typeof isNewRecord !== 'boolean') {
-          return
-        }
-
-        setNotice(isNewRecord
-          ? 'Resultado registrado. Seu recorde foi atualizado!'
-          : 'Resultado recebido. Seu recorde anterior continua valendo.')
-        setPendingScore(null)
+        setPendingScore((current) => (
+          current === score ? { ...score, saved: true, isNewRecord } : current
+        ))
       })
       .catch((requestError) => {
-        if (active) {
-          setError(requestError.message || 'Não foi possível registrar o resultado.')
-        }
+        console.error('Falha ao registrar resultado no ranking.', requestError)
+        setError(requestError.message || 'Não foi possível registrar o resultado.')
       })
-      .finally(() => {
-        if (active) {
-          setIsSaving(false)
-        }
-      })
+      .finally(() => setIsSaving(false))
+  }, [attempt, displayName, isRegisteredUser, pendingScore, setPendingScore])
 
-    return () => {
-      active = false
-    }
-  }, [displayName, isRegisteredUser, pendingScore, setPendingScore])
+  function retry() {
+    savingRef.current = null
+    setError('')
+    setAttempt((current) => current + 1)
+  }
+
+  const notice = pendingScore?.saved
+    ? pendingScore.isNewRecord
+      ? 'Resultado registrado. Seu recorde foi atualizado!'
+      : 'Resultado recebido. Seu recorde anterior continua valendo.'
+    : ''
+
+  return { error, isRegisteredUser, isSaving, notice, pendingScore, retry }
+}
+
+function RankingStatus({ registration }) {
+  const { error, isRegisteredUser, isSaving, notice, retry } = registration
+
+  if (!isRegisteredUser) {
+    return (
+      <span className="ranking-status">
+        Quer entrar no ranking? <Link to="/login">Entre ou crie uma conta</Link>.
+      </span>
+    )
+  }
+
+  if (isSaving) {
+    return <span className="ranking-status" aria-live="polite">Salvando no ranking…</span>
+  }
+
+  if (error) {
+    return (
+      <span className="ranking-status ranking-status-error" role="alert">
+        {error}{' '}
+        <button className="text-button" onClick={retry} type="button">Tentar de novo</button>
+      </span>
+    )
+  }
+
+  if (notice) {
+    return <span className="ranking-status ranking-status-ok" role="status">🏆 {notice}</span>
+  }
+
+  return null
+}
+
+function ResultPage() {
+  const registration = useScoreRegistration()
+  const { error, isRegisteredUser, isSaving, notice, pendingScore, retry } = registration
 
   return (
-    <section className="page-card" aria-labelledby="result-title">
+    <section className={`page-card result-card ${pendingScore?.status ?? ''}`} aria-labelledby="result-title">
       <p className="eyebrow">Resultado da partida</p>
       <h1 id="result-title">{pendingScore?.status === 'won' ? 'Você venceu!' : 'Fim da partida'}</h1>
       {!pendingScore && (
@@ -231,8 +336,16 @@ function ResultPage() {
       )}
       {isSaving && <p className="page-description" aria-live="polite">Registrando resultado...</p>}
       {notice && <p className="feature-notice" role="status">{notice}</p>}
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <Link className="button button-secondary" to="/ranking">Ver ranking</Link>
+      {error && (
+        <div>
+          <p className="form-error" role="alert">{error}</p>
+          <button className="button button-secondary" onClick={retry} type="button">Tentar de novo</button>
+        </div>
+      )}
+      <div className="home-actions">
+        <Link className="button button-primary" to="/ranking">Ver ranking</Link>
+        <Link className="button button-secondary" to="/">Jogar de novo</Link>
+      </div>
     </section>
   )
 }
@@ -444,7 +557,7 @@ function LoginPage() {
     setIsSubmitting(true)
     try {
       await signIn(validation.data)
-      navigate(pendingScore ? '/resultado' : location.state?.from?.pathname ?? '/conta', {
+      navigate(pendingScore && !pendingScore.saved ? '/resultado' : location.state?.from?.pathname ?? '/conta', {
         replace: true,
       })
     } catch (error) {
@@ -540,7 +653,7 @@ function SignUpPage() {
       const data = await signUp({ displayName, email, password })
 
       if (data.session) {
-        navigate(pendingScore ? '/resultado' : '/conta', { replace: true })
+        navigate(pendingScore && !pendingScore.saved ? '/resultado' : '/conta', { replace: true })
       } else {
         setNotice('Conta criada! Confirme seu e-mail pelo link que enviamos e depois faça login.')
       }
@@ -774,6 +887,7 @@ function RoomSetupPage({ action }) {
                     type="radio"
                     value={option.value}
                   />
+                  <DifficultyIcon value={option.value} />
                   <span>
                     <strong>{option.label}</strong>
                     <span>{option.detail}</span>
@@ -970,39 +1084,213 @@ function RoomWaitingPage() {
   )
 }
 
-function HangmanFigure({ errors }) {
+const HANGMAN_PART_COUNT = 10
+const confettiColors = ['#f2bd4b', '#7fd36b', '#f29bc6', '#b685ff', '#ff9a3c', '#8fd3ff']
+
+function useLetterKeyboard(enabled, onLetter) {
+  const handlerRef = useRef(onLetter)
+
+  useEffect(() => {
+    handlerRef.current = onLetter
+  })
+
+  useEffect(() => {
+    if (!enabled) {
+      return undefined
+    }
+
+    function handleKeyDown(event) {
+      if (event.ctrlKey || event.metaKey || event.altKey || event.key.length !== 1) {
+        return
+      }
+
+      if (event.target instanceof Element && event.target.closest('input, textarea, select')) {
+        return
+      }
+
+      const letter = event.key.normalize('NFD').replace(/\p{Diacritic}/gu, '').toUpperCase()
+      if (/^[A-Z]$/.test(letter)) {
+        handlerRef.current(letter)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [enabled])
+}
+
+function Confetti() {
+  return (
+    <div className="confetti" aria-hidden="true">
+      {Array.from({ length: 28 }, (_, index) => (
+        <span
+          key={index}
+          style={{
+            left: `${(index * 37) % 100}%`,
+            background: confettiColors[index % confettiColors.length],
+            animationDelay: `${(index % 9) * 0.12}s`,
+            animationDuration: `${2.2 + (index % 5) * 0.35}s`,
+            transform: `rotate(${index * 29}deg)`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+function Lives({ errors, maxErrors }) {
+  return (
+    <div className="lives" role="img" aria-label={`${Math.max(maxErrors - errors, 0)} vidas restantes de ${maxErrors}`}>
+      {Array.from({ length: maxErrors }, (_, index) => (
+        <span className={`life${index < errors ? ' lost' : ''}`} key={index}>♥</span>
+      ))}
+    </div>
+  )
+}
+
+function HangmanFigure({ errors, maxErrors = MAX_ERRORS, status = 'in_progress' }) {
+  const shown = errors <= 0
+    ? 0
+    : Math.min(HANGMAN_PART_COUNT, Math.ceil((errors / maxErrors) * HANGMAN_PART_COUNT))
+  const isLost = status === 'lost'
+  const isWon = status === 'won'
+  const eyes = isLost
+    ? <path d="M222 113l6 6m0-6l-6 6M236 113l6 6m0-6l-6 6" stroke="#1e110a" strokeWidth="2.4" strokeLinecap="round" fill="none" />
+    : (
+        <>
+          <circle cx="225" cy="116" r={isWon ? 2.6 : 2.3} fill="#1e110a" />
+          <circle cx="239" cy="116" r={isWon ? 2.6 : 2.3} fill="#1e110a" />
+          <circle cx="225.8" cy="115.2" r=".8" fill="#fff" />
+          <circle cx="239.8" cy="115.2" r=".8" fill="#fff" />
+        </>
+      )
+  const mouth = isWon
+    ? <path d="M224 125q8 9 16 0" stroke="#7a2b1c" strokeWidth="2.4" strokeLinecap="round" fill="#fff6e6" />
+    : <path d="M226 130q6-6 12 0" stroke="#7a2b1c" strokeWidth="2.4" strokeLinecap="round" fill="none" />
   const parts = [
-    <circle cx="174" cy="91" r="19" key="head" />,
-    <path d="M174 110v49" key="body" />,
-    <path d="m174 121-25 25" key="left-arm" />,
-    <path d="m174 121 25 25" key="right-arm" />,
-    <path d="m174 159-23 29" key="left-leg" />,
-    <path d="m174 159 23 29" key="right-leg" />,
+    <g key="head">
+      <circle cx="232" cy="118" r="20" fill="#f4c99a" stroke="#3b2412" strokeWidth="3" />
+      <circle cx="223" cy="124" r="4" fill="#f29bc6" opacity=".35" />
+      <circle cx="241" cy="124" r="4" fill="#f29bc6" opacity=".35" />
+    </g>,
+    <path d="M232 138v50" key="body" stroke="#3b2412" strokeWidth="10" strokeLinecap="round" />,
+    <path d="m232 152-24 24" key="left-arm" stroke="#3b2412" strokeWidth="9" strokeLinecap="round" />,
+    <path d="m232 152 24 24" key="right-arm" stroke="#3b2412" strokeWidth="9" strokeLinecap="round" />,
+    <path d="m232 188-18 34" key="left-leg" stroke="#3b2412" strokeWidth="10" strokeLinecap="round" />,
+    <path d="m232 188 18 34" key="right-leg" stroke="#3b2412" strokeWidth="10" strokeLinecap="round" />,
+    <g key="hat">
+      <ellipse cx="232" cy="101" rx="28" ry="6.5" fill="#c58f3a" stroke="#3b2412" strokeWidth="2.5" />
+      <path d="M216 100q2-24 16-24t16 24z" fill="#e0a94a" stroke="#3b2412" strokeWidth="2.5" strokeLinejoin="round" />
+      <path d="M217 96h30" stroke="#8b4b08" strokeWidth="4" />
+    </g>,
+    <g key="eyes">{eyes}</g>,
+    <g key="mouth">{mouth}</g>,
+    <g key="boots">
+      <ellipse cx="211" cy="224" rx="9" ry="5" fill="#5b3a1e" stroke="#2c1a0f" strokeWidth="2" />
+      <ellipse cx="253" cy="224" rx="9" ry="5" fill="#5b3a1e" stroke="#2c1a0f" strokeWidth="2" />
+    </g>,
   ]
+  // Cores internas do corpo (por cima do contorno escuro).
+  const fills = {
+    'body': <path d="M232 138v50" stroke="#e8604c" strokeWidth="6" strokeLinecap="round" />,
+    'left-arm': <path d="m232 152-24 24" stroke="#e8604c" strokeWidth="5" strokeLinecap="round" />,
+    'right-arm': <path d="m232 152 24 24" stroke="#e8604c" strokeWidth="5" strokeLinecap="round" />,
+    'left-leg': <path d="m232 188-18 34" stroke="#4d7fd6" strokeWidth="6" strokeLinecap="round" />,
+    'right-leg': <path d="m232 188 18 34" stroke="#4d7fd6" strokeWidth="6" strokeLinecap="round" />,
+  }
 
   return (
-    <svg className="hangman-figure" viewBox="0 0 260 230" role="img"
-      aria-label={`Forca de madeira com ${errors} erros`}>
+    <svg
+      aria-label={`Forca de madeira com ${errors} de ${maxErrors} erros`}
+      className={`hangman-figure ${status}`}
+      role="img"
+      viewBox="0 0 320 280"
+    >
       <defs>
-        <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor="#a85c0b" />
-          <stop offset=".45" stopColor="#d18a20" />
-          <stop offset="1" stopColor="#a85c0b" />
+        <linearGradient id="wood-post" x1="0" x2="1" y1="0" y2="0">
+          <stop offset="0" stopColor="#7a4416" />
+          <stop offset=".35" stopColor="#d18a3a" />
+          <stop offset=".7" stopColor="#a8661f" />
+          <stop offset="1" stopColor="#6a3a12" />
         </linearGradient>
+        <linearGradient id="wood-beam" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="#e0a14c" />
+          <stop offset=".5" stopColor="#b2702a" />
+          <stop offset="1" stopColor="#74401a" />
+        </linearGradient>
+        <linearGradient id="stone" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="#8b8479" />
+          <stop offset="1" stopColor="#4a443d" />
+        </linearGradient>
+        <radialGradient id="lantern-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0" stopColor="#ffd37a" stopOpacity=".75" />
+          <stop offset="1" stopColor="#ffd37a" stopOpacity="0" />
+        </radialGradient>
+        <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="3" floodColor="#000" floodOpacity=".45" stdDeviation="3" />
+        </filter>
       </defs>
-      <path d="M24 218H235" stroke="#55505a" strokeWidth="9" strokeLinecap="round" />
-      <path d="M66 215V18h25v197zM66 18h170v25H66zM89 100l74-82h28l-102 111z"
-        fill="url(#wood)" stroke="#8b4b08" strokeWidth="2" strokeLinejoin="round" />
-      <path d="M66 18h25M91 43h145" stroke="#e2a13b" strokeWidth="3" opacity=".55" />
-      <path d="M174 43v32" stroke="#f8bd39" strokeWidth="7" strokeLinecap="round" />
-      <path d="M174 74c-23 12-24 39 0 52 24-13 23-40 0-52z"
-        fill="none" stroke="#f8bd39" strokeWidth="7" strokeLinecap="round" />
-      <path d="M164 68q10 8 20 0M164 75q10 8 20 0"
-        fill="none" stroke="#f8bd39" strokeWidth="6" strokeLinecap="round" />
-      {parts.slice(0, errors).map((part) => (
-        <g className="hangman-part" key={part.key}>{part}</g>
-      ))}
+
+      <circle cx="232" cy="130" r="110" fill="url(#lantern-glow)" opacity=".45" />
+
+      {/* Pedra do chão */}
+      <ellipse cx="160" cy="268" rx="132" ry="9" fill="#000" opacity=".35" />
+      <path d="M30 248q0-12 14-12h232q14 0 14 12v10q0 8-12 8H42q-12 0-12-8z" fill="url(#stone)" stroke="#2a2420" strokeWidth="3" />
+      <path d="M70 238v26M140 238v26M214 238v26" stroke="#2a2420" strokeWidth="2" opacity=".5" />
+      <path d="M40 237q10-8 22-2t24 0 20-4" fill="none" stroke="#6fae45" strokeWidth="5" strokeLinecap="round" />
+      <path d="M220 236q12-8 24-2t26 0" fill="none" stroke="#5e8f3d" strokeWidth="5" strokeLinecap="round" />
+
+      {/* Madeira */}
+      <g filter="url(#soft-shadow)">
+        <rect x="70" y="30" width="26" height="210" rx="4" fill="url(#wood-post)" stroke="#3b2412" strokeWidth="3" />
+        <rect x="70" y="30" width="196" height="26" rx="4" fill="url(#wood-beam)" stroke="#3b2412" strokeWidth="3" />
+        <path d="M96 124 154 56h-28l-30 36z" fill="url(#wood-beam)" stroke="#3b2412" strokeWidth="3" strokeLinejoin="round" />
+      </g>
+      <path d="M78 66v160M86 80v130M82 40h170M120 48h120" stroke="#5a2f10" strokeWidth="1.4" opacity=".35" fill="none" />
+      <path d="M74 34h4v200h-4z" fill="#fff" opacity=".12" />
+      <circle cx="83" cy="43" r="3" fill="#2c1a0f" />
+      <circle cx="255" cy="43" r="3" fill="#2c1a0f" />
+      <circle cx="83" cy="226" r="3" fill="#2c1a0f" />
+
+      {/* Lanterna pendurada */}
+      <g className="gallows-lantern">
+        <path d="M106 56v14" stroke="#3b2412" strokeWidth="2.5" />
+        <rect x="98" y="70" width="16" height="20" rx="4" fill="#ffd37a" stroke="#3b2412" strokeWidth="2.5" />
+        <path d="M98 78h16M98 84h16" stroke="#3b2412" strokeWidth="1.4" />
+      </g>
+
+      {/* Corda + personagem */}
+      <g className={`hanging-group${isLost ? ' is-lost' : ''}`}>
+        <path d="M232 56v34" stroke="#e9c27a" strokeWidth="5" strokeLinecap="round" />
+        <path d="M232 56v34" stroke="#8b5a20" strokeWidth="1.2" strokeDasharray="3 3" />
+        <ellipse cx="232" cy="102" rx="14" ry="15" fill="none" stroke="#e9c27a" strokeWidth="4.5" />
+        <rect x="226" y="86" width="12" height="8" rx="3" fill="#c9985a" stroke="#6a3a12" strokeWidth="1.6" />
+        {parts.slice(0, shown).map((part) => (
+          <g className="hangman-part" key={part.key}>
+            {part}
+            {fills[part.key]}
+          </g>
+        ))}
+      </g>
+
+      {/* Vaga-lumes */}
+      <g className="fireflies">
+        <circle cx="40" cy="90" r="2.6" />
+        <circle cx="290" cy="160" r="2.2" />
+        <circle cx="300" cy="70" r="2.6" />
+        <circle cx="46" cy="170" r="2" />
+      </g>
     </svg>
+  )
+}
+
+function HangmanStage({ errors, maxErrors = MAX_ERRORS, status = 'in_progress' }) {
+  return (
+    <div className={`hangman-stage ${status}`}>
+      <HangmanFigure errors={errors} maxErrors={maxErrors} status={status} />
+      <Lives errors={errors} maxErrors={maxErrors} />
+      {status === 'won' && <Confetti />}
+    </div>
   )
 }
 
@@ -1088,6 +1376,10 @@ function RoundPage({ soundEffectsEnabled }) {
       return
     }
 
+    if (round.correct_letters?.includes(letter) || round.incorrect_letters?.includes(letter)) {
+      return
+    }
+
     setIsSubmitting(true)
     setError('')
 
@@ -1096,9 +1388,10 @@ function RoundPage({ soundEffectsEnabled }) {
       setRound(nextRound)
       setSeconds(nextRound.elapsed_seconds)
       if (soundEffectsEnabled) {
-        playGuessSound(nextRound.correct_letters.includes(letter))
         if (nextRound.status !== round.status) {
           playRoundEndSound(nextRound.status)
+        } else {
+          playGuessSound(nextRound.correct_letters.includes(letter))
         }
       }
     } catch (requestError) {
@@ -1108,12 +1401,14 @@ function RoundPage({ soundEffectsEnabled }) {
     }
   }
 
-  const elapsedLabel = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const elapsedLabel = formatElapsedTime(seconds)
   const guessedLetters = new Set([
     ...(round?.correct_letters ?? []),
     ...(round?.incorrect_letters ?? []),
   ])
   const isFinished = round?.status === 'won' || round?.status === 'lost'
+
+  useLetterKeyboard(round?.status === 'in_progress' && !isSubmitting, handleGuess)
 
   useEffect(() => {
     if (!isFinished) {
@@ -1133,8 +1428,10 @@ function RoundPage({ soundEffectsEnabled }) {
     ))
   }, [isFinished, roomId, round, setPendingScore])
 
+  const registration = useScoreRegistration()
+
   return (
-    <section className="page-card round-card" aria-labelledby="round-title">
+    <section className={`page-card round-card${round ? ' is-playing' : ''}${isFinished ? ` finished-${round.status}` : ''}`} aria-labelledby="round-title">
       <p className="eyebrow">Partida em andamento</p>
       <h1 id="round-title">
         {round?.status === 'won' ? 'Você venceu!' : round?.status === 'lost' ? 'Você perdeu' : 'Descubra a palavra'}
@@ -1145,59 +1442,72 @@ function RoundPage({ soundEffectsEnabled }) {
 
       {round && (
         <>
-          <div className="round-stats">
-            <div><span>Tempo</span><strong>{elapsedLabel}</strong></div>
-            <div><span>Erros</span><strong>{round.errors}/{round.max_errors}</strong></div>
-            <div><span>Nível</span><strong>{difficulties.find(({ value }) => value === round.difficulty)?.label}</strong></div>
-          </div>
+          <HangmanStage errors={round.errors} maxErrors={round.max_errors} status={round.status} />
 
-          <HangmanFigure errors={round.errors} />
-
-          <div className="word-display" aria-label="Palavra oculta">
-            {Array.from(round.masked_word ?? '').map((letter, index) => (
-              <span className="word-letter" key={`${index}-${letter}`}>
-                {letter === '_' ? '' : letter}
-              </span>
-            ))}
-          </div>
-
-          {isFinished && (
-            <div className={`round-result ${round.status}`} role="status">
-              <strong>{round.status === 'won' ? 'Parabéns!' : 'Fim da rodada'}</strong>
-              <span>A palavra era <b>{round.revealed_word}</b>.</span>
-              <span>Seu tempo: {elapsedLabel} · Erros: {round.errors}</span>
+          <div className="round-game-panel">
+            <div className="round-stats">
+              <div><span>Tempo</span><strong>{elapsedLabel}</strong></div>
+              <div><span>Erros</span><strong>{round.errors}/{round.max_errors}</strong></div>
+              <div><span>Nível</span><strong>{difficulties.find(({ value }) => value === round.difficulty)?.label}</strong></div>
             </div>
-          )}
 
-          <div className="letter-keyboard" aria-label="Teclado de letras">
-            {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
-              const isGuessed = guessedLetters.has(letter)
-              const isCorrect = round.correct_letters?.includes(letter)
+            <div className="clue-board">
+              <span>Palavra com <b>{(round.masked_word ?? '').length}</b> letras</span>
+              {(round.incorrect_letters ?? []).length > 0 && (
+                <span>Erradas: <b className="clue-wrong">{round.incorrect_letters.join(' ')}</b></span>
+              )}
+            </div>
 
-              return (
+            <div className="word-display" aria-label="Palavra oculta">
+              {Array.from(round.masked_word ?? '').map((letter, index) => (
+                <span className="word-letter" key={`${index}-${letter}`}>
+                  {letter === '_' ? '' : letter}
+                </span>
+              ))}
+            </div>
+
+            {isFinished && (
+              <div className={`round-result ${round.status}`} role="status">
+                <strong>{round.status === 'won' ? '🎉 Parabéns!' : '💀 Fim da rodada'}</strong>
+                <span>A palavra era <b>{round.revealed_word}</b>.</span>
+                <span>Seu tempo: {elapsedLabel} · Erros: {round.errors}</span>
+                {round.status === 'won' && <RankingStatus registration={registration} />}
+              </div>
+            )}
+
+            <div className="letter-keyboard" aria-label="Teclado de letras">
+              {Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ').map((letter) => {
+                const isGuessed = guessedLetters.has(letter)
+                const isCorrect = round.correct_letters?.includes(letter)
+
+                return (
+                  <button
+                    aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
+                    className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
+                    disabled={isGuessed || round.status !== 'in_progress' || isSubmitting}
+                    key={letter}
+                    onClick={() => void handleGuess(letter)}
+                    type="button"
+                  >
+                    {letter}
+                  </button>
+                )
+              })}
+            </div>
+
+            {isFinished && (
+              <div className="home-actions">
                 <button
-                  aria-label={`Letra ${letter}${isGuessed ? ' já utilizada' : ''}`}
-                  className={`letter-key${isGuessed ? isCorrect ? ' correct' : ' incorrect' : ''}`}
-                  disabled={isGuessed || round.status !== 'in_progress' || isSubmitting}
-                  key={letter}
-                  onClick={() => void handleGuess(letter)}
+                  className="button button-primary"
+                  onClick={() => navigate('/resultado')}
                   type="button"
                 >
-                  {letter}
+                  Ver resultado
                 </button>
-              )
-            })}
+                <NavLink className="button button-secondary" to="/ranking">Ver ranking</NavLink>
+              </div>
+            )}
           </div>
-
-          {isFinished && (
-            <button
-              className="button button-primary"
-              onClick={() => navigate('/salas')}
-              type="button"
-            >
-              Ver resultado
-            </button>
-          )}
         </>
       )}
     </section>
@@ -1209,6 +1519,8 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
   const modeLabel = isIndividual ? 'individual' : 'solo'
   const heading = isIndividual ? 'Jogar individual' : 'Jogar sozinho'
   const eyebrow = isIndividual ? 'Modo individual' : 'Modo solo'
+  const { setPendingScore } = useAuth()
+  const registration = useScoreRegistration()
 
   const [difficulty, setDifficulty] = useState('easy')
   const [round, setRound] = useState(null)
@@ -1217,6 +1529,7 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   function startNewGame(nextDifficulty = difficulty) {
+    setPendingScore(null)
     setRound(createSoloRound(nextDifficulty))
     setSeconds(0)
     setError('')
@@ -1224,6 +1537,12 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
     if (soundEffectsEnabled) {
       playGameStartSound()
     }
+  }
+
+  function changeDifficulty() {
+    setPendingScore(null)
+    setRound(null)
+    setSeconds(0)
   }
 
   useEffect(() => {
@@ -1243,6 +1562,10 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
       return
     }
 
+    if (round.correctGuesses.includes(letter) || round.incorrectGuesses.includes(letter)) {
+      return
+    }
+
     setIsSubmitting(true)
     setError('')
 
@@ -1250,9 +1573,10 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
       const nextRound = guessLetter(round, letter)
       setRound(nextRound)
       if (soundEffectsEnabled) {
-        playGuessSound(nextRound.correctGuesses.includes(letter))
         if (nextRound.status !== round.status) {
           playRoundEndSound(nextRound.status)
+        } else {
+          playGuessSound(nextRound.correctGuesses.includes(letter))
         }
       }
     } catch (requestError) {
@@ -1262,38 +1586,62 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
     }
   }
 
-  const elapsedLabel = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+  const elapsedLabel = formatElapsedTime(seconds)
   const guessedLetters = new Set([
     ...(round?.correctGuesses ?? []),
     ...(round?.incorrectGuesses ?? []),
   ])
   const isFinished = round?.status === 'won' || round?.status === 'lost'
+  const errorCount = round?.incorrectGuesses.length ?? 0
+
+  useLetterKeyboard(round?.status === 'in_progress' && !isSubmitting, handleGuess)
+
+  // Guarda o resultado da partida: é isso que o ranking envia ao Supabase quando a pessoa está logada.
+  useEffect(() => {
+    if (!isFinished) {
+      return
+    }
+
+    setPendingScore((currentScore) => (
+      currentScore?.source === round
+        ? currentScore
+        : {
+            source: round,
+            status: round.status,
+            difficulty,
+            elapsedSeconds: seconds,
+            errors: round.incorrectGuesses.length,
+          }
+    ))
+  }, [difficulty, isFinished, round, seconds, setPendingScore])
 
   return (
-    <section className="page-card round-card" aria-labelledby={`${modeLabel}-title`}>
+    <section className={`page-card round-card${round ? ' is-playing' : ''}${isFinished ? ` finished-${round.status}` : ''}`} aria-labelledby={`${modeLabel}-title`}>
       <p className="eyebrow">{eyebrow}</p>
       <h1 id={`${modeLabel}-title`}>{heading}</h1>
 
       {!round && (
-        <div className="room-form" style={{ gap: '1.25rem' }}>
-          <div className="difficulty-picker">
-            <label className="form-field" htmlFor={`${modeLabel}-difficulty`}>
-              <span>Escolha o nível antes de iniciar a partida</span>
-              <select
-                id={`${modeLabel}-difficulty`}
-                onChange={(event) => {
-                  const nextDifficulty = event.target.value
-                  setDifficulty(nextDifficulty)
-                }}
-                value={difficulty}
-              >
-                {difficulties.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
+        <fieldset className="difficulty-field">
+          <legend>Escolha o nível antes de iniciar a partida</legend>
+          <div className="difficulty-options">
+            {difficulties.map((option) => (
+              <label className="difficulty-option" key={option.value}>
+                <input
+                  checked={difficulty === option.value}
+                  name={`${modeLabel}-difficulty`}
+                  onChange={() => setDifficulty(option.value)}
+                  type="radio"
+                  value={option.value}
+                />
+                <DifficultyIcon value={option.value} />
+                <span>
+                  <strong>{option.label}</strong>
+                  <span>{option.detail}</span>
+                </span>
+              </label>
+            ))}
           </div>
-        </div>
+        </fieldset>
       )}
 
       {error && <p className="form-error" role="alert">{error}</p>}
@@ -1312,52 +1660,38 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
 
       {round && (
         <>
-          <svg className="hangman-figure" viewBox="0 0 200 180" role="img" aria-label={`Forca com ${round.incorrectGuesses.length} de ${MAX_ERRORS} erros`}>
-            <g className="wooden-gallows">
-        <rect x="34" y="158" width="132" height="10" rx="4" className="wood-base" />
-        <rect x="48" y="18" width="18" height="142" rx="2" className="wood-post" />
-        <rect x="48" y="18" width="112" height="18" rx="2" className="wood-beam" />
-        <path d="M64 76 L104 36 L88 36 L64 60 Z" className="wood-brace" />
-        <path d="M48 18h18v142H48z" className="wood-highlight" />
-        <circle cx="57" cy="27" r="2" className="wood-nail" />
-        <circle cx="151" cy="27" r="2" className="wood-nail" />
-      </g>
-            {[
-              <path d="M75 26h50M88 26l-7 12M112 26l7 12" key="hat" />,
-              <circle cx="100" cy="61" key="head" r="20" />,
-              <path d="M100 81v49" key="body" />,
-              <path d="m100 91-25 25" key="left-arm" />,
-              <path d="m100 91 25 25" key="right-arm" />,
-              <path d="m100 130-23 27" key="left-leg" />,
-              <path d="m100 130 23 27" key="right-leg" />,
-              <circle cx="93" cy="59" key="left-eye" r="1.5" />,
-              <circle cx="107" cy="59" key="right-eye" r="1.5" />,
-              <path d="M94 69q6-5 12 0" key="mouth" />,
-            ].slice(0, round.incorrectGuesses.length).map((part) => (
-              <g className="hangman-part" key={part.key}>{part}</g>
-            ))}
-          </svg>
+          <HangmanStage errors={errorCount} maxErrors={MAX_ERRORS} status={round.status} />
 
           <div className="round-game-panel">
             <div className="round-stats">
               <div><span>Tempo</span><strong>{elapsedLabel}</strong></div>
-              <div><span>Erros</span><strong>{round.incorrectGuesses.length}/{MAX_ERRORS}</strong></div>
+              <div><span>Erros</span><strong>{errorCount}/{MAX_ERRORS}</strong></div>
               <div><span>Nível</span><strong>{difficulties.find(({ value }) => value === difficulty)?.label}</strong></div>
+            </div>
+
+            <div className="clue-board">
+              <span>Palavra com <b>{round.word.length}</b> letras</span>
+              {errorCount > 0 && (
+                <span>Erradas: <b className="clue-wrong">{round.incorrectGuesses.join(' ')}</b></span>
+              )}
             </div>
 
             <div className="word-display" aria-label="Palavra oculta">
               {Array.from(round.word ?? '').map((letter, index) => (
                 <span className="word-letter" key={`${index}-${letter}`}>
-                  {round.correctGuesses.includes(letter) ? letter : ''}
+                  {round.correctGuesses.includes(normalizeWord(letter)) || round.status === 'lost' ? letter : ''}
                 </span>
               ))}
             </div>
 
             {isFinished && (
               <div className={`round-result ${round.status}`} role="status">
-                <strong>{round.status === 'won' ? 'Parabéns!' : 'Fim da rodada'}</strong>
+                <strong>{round.status === 'won' ? '🎉 Parabéns!' : '💀 Fim da rodada'}</strong>
                 <span>A palavra era <b>{round.word}</b>.</span>
-                <span>Seu tempo: {elapsedLabel} · Erros: {round.incorrectGuesses.length}</span>
+                <span>Seu tempo: {elapsedLabel} · Erros: {errorCount}</span>
+                {round.status === 'won'
+                  ? <RankingStatus registration={registration} />
+                  : <span className="ranking-status">Partidas perdidas não entram no ranking.</span>}
               </div>
             )}
 
@@ -1385,7 +1719,10 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
               <button className="button button-primary" onClick={() => startNewGame()} type="button">
                 Nova partida
               </button>
-              <NavLink className="button button-secondary" to="/">Voltar ao início</NavLink>
+              <button className="button button-secondary" onClick={changeDifficulty} type="button">
+                Trocar nível
+              </button>
+              <NavLink className="button button-secondary" to="/ranking">Ranking</NavLink>
             </div>
           </div>
         </>
@@ -1394,22 +1731,23 @@ function SoloGamePage({ mode = 'solo', soundEffectsEnabled }) {
   )
 }
 
-function IndividualGamePage({ soundEffectsEnabled }) {
-  return <SoloGamePage mode="individual" soundEffectsEnabled={soundEffectsEnabled} />
-}
-
 function HomePage() {
   return (
     <section className="home-card" aria-labelledby="home-title">
-      <p className="eyebrow">Escolha o modo da partida</p>
-      <h1 id="home-title">Jogo da <span>Forca</span></h1>
+      <div className="home-sign">
+        <h1 id="home-title">Jogo da <span>Forca</span></h1>
+        <p>Aventura das palavras</p>
+      </div>
+      <CaveMouth />
       <p className="page-description">
-        Primeiro escolha como deseja jogar. Depois selecione o nível e comece a partida.
+        Escolha como deseja jogar. Depois selecione o nível e comece a partida.
       </p>
       <div className="home-actions">
-        <NavLink className="button button-primary" to={gameModeOptions[0].to}>{gameModeOptions[0].label}</NavLink>
-        <NavLink className="button button-secondary" to="/salas">Jogar com amigos</NavLink>
-        <NavLink className="button button-secondary" to="/ranking">Ver ranking</NavLink>
+        <div className="home-play-actions">
+          <NavLink className="button button-primary" to="/solo">Jogar sozinho</NavLink>
+          <NavLink className="button button-secondary" to="/salas">Jogar com amigos</NavLink>
+        </div>
+        <NavLink className="button button-secondary home-ranking-button" to="/ranking">Ver ranking</NavLink>
       </div>
     </section>
   )
@@ -1430,6 +1768,8 @@ function AppLayout() {
   const { session } = useAuth()
   const location = useLocation()
   const backgroundLocation = location.state?.backgroundLocation
+  const scenePath = (backgroundLocation || location).pathname
+  const scene = /^\/(solo|individual|salas)/.test(scenePath) ? 'cave' : 'forest'
   const [settings, setSettings] = useState(loadSettings)
 
   useEffect(() => {
@@ -1468,7 +1808,8 @@ function AppLayout() {
   )
 
   return (
-    <div className="app-shell" onClickCapture={handleAppClick}>
+    <div className="app-shell" data-scene={scene} onClickCapture={handleAppClick}>
+      <SceneDecor />
       <header className="site-header">
         <NavLink className="brand" to="/" aria-label="Jogo da Forca — início">
           FORCA<span>.</span>
@@ -1493,7 +1834,6 @@ function AppLayout() {
         <Routes location={backgroundLocation || location}>
           <Route path="/" element={<HomePage />} />
           <Route path="/solo" element={<SoloGamePage soundEffectsEnabled={settings.soundEffects} />} />
-          <Route path="/individual" element={<IndividualGamePage soundEffectsEnabled={settings.soundEffects} />} />
           <Route path="/salas" element={<RoomsPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/cadastro" element={<SignUpPage />} />
