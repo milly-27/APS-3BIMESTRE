@@ -747,3 +747,11 @@ body,
   .home-play-actions .button { font-size: .82rem; }
   .home-actions .home-ranking-button { width: 100%; }
 }
+
+/* ---------- Tela de espera da sala ---------- */
+.room-waiting {
+  max-height: calc(100dvh - 100px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}

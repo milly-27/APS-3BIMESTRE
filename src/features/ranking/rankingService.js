@@ -13,7 +13,7 @@ function getClient() {
   return getSupabaseClient()
 }
 
-function validateRankingPayload({ displayName, difficulty, elapsedSeconds, errors }) {
+export async function saveBestResult({ displayName, difficulty, elapsedSeconds, errors }) {
   if (
     typeof displayName !== 'string'
     || displayName.trim().length < 1
@@ -33,10 +33,6 @@ function validateRankingPayload({ displayName, difficulty, elapsedSeconds, error
   if (!Number.isInteger(errors) || errors < 0 || errors > 9) {
     throw new TypeError('A quantidade de erros do resultado é inválida.')
   }
-}
-
-export async function saveBestResult({ displayName, difficulty, elapsedSeconds, errors }) {
-  validateRankingPayload({ displayName, difficulty, elapsedSeconds, errors })
 
   const { data, error } = await getClient().rpc('save_ranking_result', {
     p_display_name: displayName.trim(),
@@ -61,7 +57,25 @@ export async function saveRoomResult({ roomId, displayName, difficulty, elapsedS
     throw new TypeError('Identificador da sala inválido.')
   }
 
-  validateRankingPayload({ displayName, difficulty, elapsedSeconds, errors })
+  if (
+    typeof displayName !== 'string'
+    || displayName.trim().length < 1
+    || displayName.trim().length > 32
+  ) {
+    throw new TypeError('O nome deve ter de 1 a 32 caracteres.')
+  }
+
+  if (!VALID_DIFFICULTIES.has(difficulty)) {
+    throw new TypeError('Nível de dificuldade inválido.')
+  }
+
+  if (!Number.isInteger(elapsedSeconds) || elapsedSeconds < 0) {
+    throw new TypeError('O tempo do resultado é inválido.')
+  }
+
+  if (!Number.isInteger(errors) || errors < 0 || errors > 9) {
+    throw new TypeError('A quantidade de erros do resultado é inválida.')
+  }
 
   const { data, error } = await getClient().rpc('save_room_ranking_result', {
     p_room_id: roomId,

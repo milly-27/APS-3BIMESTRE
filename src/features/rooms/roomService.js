@@ -74,6 +74,12 @@ async function callRoomFunction(functionName, parameters) {
   return room
 }
 
+export async function getCurrentPlayerId() {
+  const client = getClient()
+  const session = await ensurePlayerSession(client)
+  return session.user?.id ?? null
+}
+
 export async function createRoom({ difficulty, displayName }) {
   if (!DIFFICULTIES.has(difficulty)) {
     throw new TypeError('Selecione um nível de dificuldade válido.')
@@ -98,6 +104,34 @@ export async function joinRoom({ inviteCode, displayName }) {
     p_invite_code: normalizedCode,
     p_display_name: validateDisplayName(displayName),
   })
+}
+
+export async function replayRoom(roomId, difficulty) {
+  if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(roomId)) {
+    throw new TypeError('Identificador da sala inválido.')
+  }
+
+  if (!['easy', 'medium', 'hard', 'expert'].includes(difficulty)) {
+    throw new TypeError('Selecione um nível de dificuldade válido.')
+  }
+
+  const client = getClient()
+  await ensurePlayerSession(client)
+  const { data, error } = await client.rpc('replay_room', {
+    p_room_id: roomId,
+    p_difficulty: difficulty,
+  })
+
+  if (error) {
+    throw new Error(`Não foi possível iniciar outra partida: ${error.message}`, { cause: error })
+  }
+
+  const result = Array.isArray(data) ? data[0] : data
+  if (!result?.room_id || result.status !== 'in_progress') {
+    throw new Error('O Supabase não confirmou o reinício da partida.')
+  }
+
+  return result
 }
 
 export async function startRoom(roomId) {
@@ -205,6 +239,51 @@ export async function getRoomSnapshot(roomId) {
   }
 
   return { room: roomResult.data, players: playersResult.data }
+}
+
+export async function isRoomHost(roomId) {
+  if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(roomId)) {
+    throw new TypeError('Identificador da sala inválido.')
+  }
+
+  const client = getClient()
+  await ensurePlayerSession(client)
+  const { data, error } = await client.rpc('is_room_host', { p_room_id: roomId })
+
+  if (error) {
+    throw new Error(`Não foi possível confirmar o anfitrião: ${error.message}`, { cause: error })
+  }
+
+  return data === true
+}
+
+export async function getRoomResults(roomId) {
+  if (!/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(roomId)) {
+    throw new TypeError('Identificador da sala inválido.')
+  }
+
+  const client = getClient()
+  await ensurePlayerSession(client)
+
+  const { data, error } = await client.rpc('get_room_results', { p_room_id: roomId })
+
+  if (error) {
+    throw new Error(`Não foi possível carregar o placar da sala: ${error.message}`, { cause: error })
+  }
+
+  return (data ?? [])
+    .map((entry) => ({
+      ...entry,
+      elapsed_seconds: Number(entry.elapsed_seconds) || 0,
+      status: entry.status === 'won' ? 'won' : entry.status === 'lost' ? 'lost' : 'in_progress',
+    }))
+    .sort((first, second) => {
+      if (first.status === 'won' && second.status !== 'won') return -1
+      if (first.status !== 'won' && second.status === 'won') return 1
+      if (first.status === 'lost' && second.status !== 'lost') return 1
+      if (first.status !== 'lost' && second.status === 'lost') return -1
+      return first.elapsed_seconds - second.elapsed_seconds || first.errors - second.errors
+    })
 }
 
 export function subscribeToRoom(roomId, {

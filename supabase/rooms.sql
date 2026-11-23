@@ -25,8 +25,31 @@ create table if not exists public.room_word_bank (
 
 create table if not exists public.room_secrets (
   room_id uuid primary key references public.rooms (id) on delete cascade,
+  user_id uuid references auth.users (id) on delete cascade,
   word text not null
 );
+
+alter table public.room_secrets add column if not exists user_id uuid references auth.users (id) on delete cascade;
+update public.room_secrets rs
+set user_id = r.host_id
+from public.rooms r
+where rs.room_id = r.id and rs.user_id is null;
+alter table public.room_secrets alter column user_id set not null;
+
+create table if not exists public.solo_rounds (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  difficulty text not null check (difficulty in ('easy', 'medium', 'hard', 'expert')),
+  word text not null,
+  correct_letters text[] not null default '{}',
+  incorrect_letters text[] not null default '{}',
+  errors integer not null default 0 check (errors between 0 and 10),
+  status text not null default 'in_progress' check (status in ('in_progress', 'won', 'lost')),
+  started_at timestamptz not null default now(),
+  completed_at timestamptz
+);
+
+alter table public.solo_rounds enable row level security;
+revoke all on public.solo_rounds from anon, authenticated;
 
 create table if not exists public.room_round_players (
   room_id uuid not null references public.rooms (id) on delete cascade,
@@ -92,8 +115,23 @@ as $$
   );
 $$;
 
+create or replace function public.is_room_host(p_room_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1 from public.rooms
+    where id = p_room_id and host_id = auth.uid()
+  );
+$$;
+
 revoke all on function public.is_room_member(uuid) from public;
+revoke all on function public.is_room_host(uuid) from public;
 grant execute on function public.is_room_member(uuid) to authenticated;
+grant execute on function public.is_room_host(uuid) to authenticated;
 
 drop policy if exists "Room members can read their rooms" on public.rooms;
 create policy "Room members can read their rooms"
@@ -151,7 +189,7 @@ begin
     raise exception using errcode = '22023', message = 'O nome deve ter de 1 a 32 caracteres.';
   end if;
 
-  if p_difficulty is null or p_difficulty not in ('easy', 'medium', 'hard', 'expert')
+  if p_difficulty not in ('easy', 'medium', 'hard', 'expert')
     or p_elapsed_seconds is null or p_elapsed_seconds < 0
     or p_errors is null or p_errors not between 0 and 9 then
     raise exception using errcode = '22023', message = 'Os dados do resultado são inválidos.';
@@ -191,6 +229,7 @@ set search_path = ''
 as $$
 declare
   v_rows integer;
+  v_player public.room_round_players%rowtype;
 begin
   if auth.uid() is null then
     raise exception using errcode = '28000', message = 'A sessão do jogador não foi encontrada.';
@@ -202,21 +241,26 @@ begin
     raise exception using errcode = '42501', message = 'Você precisa participar da sala para registrar o resultado.';
   end if;
 
-  if p_display_name is null or char_length(trim(p_display_name)) not between 1 and 32 then
-    raise exception using errcode = '22023', message = 'O nome deve ter de 1 a 32 caracteres.';
+  select * into v_player
+  from public.room_round_players
+  where room_id = p_room_id and user_id = auth.uid();
+
+  if not found or v_player.status <> 'won' or v_player.completed_at is null then
+    raise exception using errcode = '55000', message = 'Nenhuma vitória válida foi encontrada nesta sala.';
   end if;
 
-  if p_difficulty is null or p_difficulty not in ('easy', 'medium', 'hard', 'expert')
-    or p_elapsed_seconds is null or p_elapsed_seconds < 0
+  if p_elapsed_seconds is not null and p_elapsed_seconds < 0
     or p_errors is null or p_errors not between 0 and 9 then
-    raise exception using errcode = '22023', message = 'Os dados do resultado da sala são inválidos.';
+    raise exception using errcode = '22023', message = 'Os dados do resultado são inválidos.';
   end if;
 
   insert into public.room_leaderboard (
     room_id, user_id, display_name, difficulty, elapsed_seconds, errors, updated_at
   )
   values (
-    p_room_id, auth.uid(), trim(p_display_name), p_difficulty, p_elapsed_seconds, p_errors, now()
+    p_room_id, auth.uid(), trim(p_display_name), p_difficulty,
+    greatest(0, floor(extract(epoch from (v_player.completed_at - v_player.started_at)))::integer),
+    v_player.errors, now()
   )
   on conflict (room_id, user_id) do update
     set display_name = excluded.display_name,
@@ -390,8 +434,14 @@ begin
     raise exception using errcode = '55000', message = 'Não há palavras cadastradas para esta dificuldade.';
   end if;
 
-  insert into public.room_secrets (room_id, word)
-    values (p_room_id, v_word);
+  update public.room_secrets rs
+    set user_id = auth.uid(), word = v_word
+    where rs.room_id = p_room_id;
+
+  if not found then
+    insert into public.room_secrets (room_id, user_id, word)
+      values (p_room_id, auth.uid(), v_word);
+  end if;
 
   insert into public.room_round_players (room_id, user_id)
     select p_room_id, rp.user_id
@@ -404,6 +454,151 @@ begin
 
   return query select p_room_id, 'in_progress'::text;
 end;
+$$;
+
+create or replace function public.replay_room(p_room_id uuid, p_difficulty text)
+returns table (room_id uuid, status text)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_room public.rooms%rowtype;
+  v_word text;
+begin
+  if auth.uid() is null then
+    raise exception using errcode = '28000', message = 'Entre na sala para jogar novamente.';
+  end if;
+
+  select r.* into v_room
+  from public.rooms r
+  where r.id = p_room_id
+  for update;
+
+  if not found then
+    raise exception using errcode = 'P0002', message = 'Sala não encontrada.';
+  end if;
+
+  if v_room.host_id <> auth.uid() then
+    raise exception using errcode = '42501', message = 'Somente o anfitrião pode iniciar outra partida.';
+  end if;
+
+  if p_difficulty not in ('easy', 'medium', 'hard', 'expert') then
+    raise exception using errcode = '22023', message = 'Nível de dificuldade inválido.';
+  end if;
+
+  select wb.word into v_word
+  from public.room_word_bank wb
+  where wb.difficulty = p_difficulty
+  order by random()
+  limit 1;
+
+  if v_word is null then
+    raise exception using errcode = '55000', message = 'Não há palavras para este nível.';
+  end if;
+
+  update public.rooms r
+  set difficulty = p_difficulty, status = 'in_progress'
+  where r.id = p_room_id;
+
+  update public.room_secrets rs
+  set user_id = auth.uid(), word = v_word
+  where rs.room_id = p_room_id;
+
+  if not found then
+    insert into public.room_secrets (room_id, user_id, word)
+    values (p_room_id, auth.uid(), v_word);
+  end if;
+
+  delete from public.room_round_players rrp
+  where rrp.room_id = p_room_id;
+
+  insert into public.room_round_players (
+    room_id, user_id, correct_letters, incorrect_letters,
+    errors, status, started_at, completed_at
+  )
+  select
+    rp.room_id, rp.user_id, '{}'::text[], '{}'::text[],
+    0, 'in_progress', now(), null
+  from public.room_players rp
+  where rp.room_id = p_room_id;
+
+  return query select p_room_id, 'in_progress'::text;
+end;
+$$;
+
+create or replace function public.get_room_results(p_room_id uuid)
+returns table (
+  user_id uuid,
+  display_name text,
+  status text,
+  errors integer,
+  elapsed_seconds integer
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+begin
+  if auth.uid() is null then
+    raise exception using errcode = '28000', message = 'A sessão do jogador não foi encontrada.';
+  end if;
+
+  if not exists (
+    select 1
+    from public.room_players rp
+    where rp.room_id = p_room_id
+      and rp.user_id = auth.uid()
+  ) then
+    raise exception using errcode = '42501', message = 'Você não participa desta sala.';
+  end if;
+
+  return query
+  with results as (
+    select
+      rp.user_id,
+      rp.display_name,
+      case
+        when rrp.status = 'won' then 'won'
+        when rrp.status = 'lost' then 'lost'
+        else 'in_progress'
+      end as status,
+      coalesce(rrp.errors, 0) as errors,
+      greatest(0, floor(extract(epoch from (
+        coalesce(rrp.completed_at, now()) - rrp.started_at
+      )))::integer) as elapsed_seconds
+    from public.room_players rp
+    left join public.room_round_players rrp
+      on rrp.room_id = rp.room_id
+     and rrp.user_id = rp.user_id
+    where rp.room_id = p_room_id
+  ), winner as (
+    select r.user_id
+    from results r
+    where r.status = 'won'
+    order by r.elapsed_seconds asc, r.errors asc, r.user_id asc
+    limit 1
+  )
+  select
+    r.user_id,
+    r.display_name,
+    case
+      when w.user_id is not null then 'won'
+      when r.status = 'in_progress' then 'in_progress'
+      else 'lost'
+    end as status,
+    r.errors,
+    r.elapsed_seconds
+  from results r
+  left join winner w on w.user_id = r.user_id
+  order by
+    case when w.user_id is not null then 0 else 1 end,
+    r.elapsed_seconds,
+    r.errors,
+    r.display_name;
+end;
+
 $$;
 
 create or replace function public.get_round_state(p_room_id uuid)
@@ -599,6 +794,15 @@ begin
       where rp.room_id = p_room_id and rp.user_id = auth.uid();
   end if;
 
+  if not exists (
+    select 1
+    from public.room_round_players rrp
+    where rrp.room_id = p_room_id
+      and rrp.status = 'in_progress'
+  ) then
+    update public.rooms r set status = 'finished' where r.id = p_room_id;
+  end if;
+
   select string_agg(
       case when translate(upper(substr(v_word, s.position, 1)),
         'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ',
@@ -623,6 +827,76 @@ begin
 end;
 $$;
 
+create or replace function public.start_solo_round(p_difficulty text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare v_word text;
+begin
+  if auth.uid() is null or coalesce((auth.jwt() ->> 'is_anonymous')::boolean, false) then
+    raise exception using errcode = '28000', message = 'Entre em uma conta para iniciar a partida.';
+  end if;
+  if p_difficulty not in ('easy', 'medium', 'hard', 'expert') then
+    raise exception using errcode = '22023', message = 'Nível inválido.';
+  end if;
+  select wb.word into v_word from public.room_word_bank wb
+    where wb.difficulty = p_difficulty order by random() limit 1;
+  if v_word is null then
+    raise exception using errcode = '55000', message = 'Não há palavras para esta dificuldade.';
+  end if;
+  insert into public.solo_rounds (user_id, difficulty, word)
+    values (auth.uid(), p_difficulty, v_word)
+  on conflict (user_id) do update set difficulty = excluded.difficulty, word = excluded.word,
+    correct_letters = '{}', incorrect_letters = '{}', errors = 0,
+    status = 'in_progress', started_at = now(), completed_at = null;
+  return true;
+end;
+$$;
+
+create or replace function public.submit_solo_guess(p_letter text)
+returns table(status text, errors integer, elapsed_seconds integer, correct_letters text[], incorrect_letters text[])
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare v_round public.solo_rounds%rowtype; v_letter text; v_normalized text;
+begin
+  if auth.uid() is null then raise exception using errcode = '28000', message = 'Sessão não encontrada.'; end if;
+  v_letter := translate(upper(trim(coalesce(p_letter, ''))), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC');
+  if char_length(v_letter) <> 1 or v_letter !~ '^[A-Z]$' then
+    raise exception using errcode = '22023', message = 'Informe apenas uma letra.';
+  end if;
+  select * into v_round from public.solo_rounds where user_id = auth.uid() for update;
+  if not found or v_round.status <> 'in_progress' then
+    raise exception using errcode = '55000', message = 'Nenhuma partida solo ativa.';
+  end if;
+  v_normalized := translate(upper(v_round.word), 'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇ', 'AAAAAEEEEIIIIOOOOOUUUUC');
+  if not (v_letter = any(v_round.correct_letters)) and not (v_letter = any(v_round.incorrect_letters)) then
+    if position(v_letter in v_normalized) > 0 then
+      v_round.correct_letters := array_append(v_round.correct_letters, v_letter);
+      if not exists (select 1 from generate_series(1, char_length(v_normalized)) s(pos)
+                     where substr(v_normalized, s.pos, 1) <> all(v_round.correct_letters)) then
+        v_round.status := 'won'; v_round.completed_at := now();
+      end if;
+    else
+      v_round.incorrect_letters := array_append(v_round.incorrect_letters, v_letter);
+      v_round.errors := v_round.errors + 1;
+      if v_round.errors >= 10 then v_round.status := 'lost'; v_round.completed_at := now(); end if;
+    end if;
+    update public.solo_rounds set correct_letters=v_round.correct_letters, incorrect_letters=v_round.incorrect_letters,
+      errors=v_round.errors, status=v_round.status, completed_at=v_round.completed_at where user_id=auth.uid();
+  end if;
+  return query select v_round.status, v_round.errors,
+    greatest(0, floor(extract(epoch from (coalesce(v_round.completed_at, now()) - v_round.started_at)))::integer),
+    v_round.correct_letters, v_round.incorrect_letters;
+end;
+$$;
+
+revoke all on function public.start_solo_round(text), public.submit_solo_guess(text) from public, anon;
+grant execute on function public.start_solo_round(text), public.submit_solo_guess(text) to authenticated;
+
 insert into public.room_word_bank (word, difficulty) values
   ('sol', 'easy'), ('rio', 'easy'), ('lua', 'easy'), ('gato', 'easy'),
   ('bola', 'easy'), ('casa', 'easy'), ('jogo', 'easy'), ('vento', 'easy'),
@@ -639,18 +913,24 @@ insert into public.room_word_bank (word, difficulty) values
   ('anticonstitucional', 'expert'), ('interdisciplinaridade', 'expert')
 on conflict (word) do update set difficulty = excluded.difficulty;
 
+revoke all on function public.replay_room(uuid, text) from public;
 revoke all on function public.create_room(text, text) from public;
 revoke all on function public.join_room(text, text) from public;
 revoke all on function public.start_room(uuid) from public;
 revoke all on function public.get_round_state(uuid) from public;
 revoke all on function public.submit_room_guess(uuid, text) from public;
+revoke all on function public.get_room_results(uuid) from public;
 revoke all on function public.save_ranking_result(text, text, integer, integer) from public, anon;
+revoke all on function public.save_room_ranking_result(uuid, text, text, integer, integer) from public, anon;
+grant execute on function public.replay_room(uuid, text) to authenticated;
 grant execute on function public.create_room(text, text) to authenticated;
 grant execute on function public.join_room(text, text) to authenticated;
 grant execute on function public.start_room(uuid) to authenticated;
 grant execute on function public.get_round_state(uuid) to authenticated;
 grant execute on function public.submit_room_guess(uuid, text) to authenticated;
+grant execute on function public.get_room_results(uuid) to authenticated;
 grant execute on function public.save_ranking_result(text, text, integer, integer) to authenticated;
+grant execute on function public.save_room_ranking_result(uuid, text, text, integer, integer) to authenticated;
 
 do $$
 begin
